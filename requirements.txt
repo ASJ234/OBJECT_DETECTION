@@ -1,0 +1,10 @@
+torch>=2.0.0
+torchvision>=0.15.0
+pycocotools
+pillow>=9.0.0
+tqdm
+matplotlib>=3.5.0
+numpy>=1.21.0
+seaborn>=0.11.0
+effdet>=0.3.0
+timm>=0.9.0

@@ -1,0 +1,32 @@
+============================================================
+DATASET SUMMARY — TBX11K
+============================================================
+Total images:         11702
+  Train:              6600
+  Val:                1800
+  Test:               3302
+Image size:           512 × 512
+
+Images with boxes:    799 (6.8%)
+Total bounding boxes: 1211
+
+Image-level tag distribution:
+  healthy: 3800 (32.5%)
+  sick_but_non-tb: 3800 (32.5%)
+  active_tb: 630 (5.4%)
+  latent_tb: 139 (1.2%)
+  active&latent_tb: 30 (0.3%)
+
+Bounding box class distribution:
+  ActiveTuberculosis: 972 (80.3%)
+  ObsoletePulmonaryTuberculosis: 239 (19.7%)
+
+Tag → Box mapping (train+val):
+  active_tb         → 100% ActiveTuberculosis
+  latent_tb         → 100% ObsoletePulmonaryTuberculosis
+  active&latent_tb  → Both classes (~50/50)
+  healthy           → No boxes
+  sick_but_non-tb   → No boxes
+
+Test set: 3302 images with no tags and no boxes — inference only.
+============================================================
