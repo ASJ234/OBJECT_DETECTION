@@ -64,13 +64,13 @@ class CocoDetection(Dataset):
 
 
 def get_transform(train):
-    transforms = []
-    transforms.append(T.ToTensor())
+    transforms_list = [T.ToTensor()]
     if train:
-        transforms.append(T.RandomHorizontalFlip(0.5))
-    transforms.append(T.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225]))
-    return T.Compose(transforms)
+        transforms_list.append(T.RandomHorizontalFlip(0.5))
+    transform = T.Compose(transforms_list)
+    def _apply(image, target):
+        return transform(image), target
+    return _apply
 
 
 def collate_fn(batch):
