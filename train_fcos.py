@@ -3,6 +3,7 @@ import sys
 import json
 
 import torch
+import wandb
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision.models.detection import fcos_resnet50_fpn
 
@@ -32,6 +33,7 @@ def get_weighted_sampler(dataset, pos_weight=4.0):
 
 
 def train():
+    wandb.init(project="tbx11k", name="fcos", config={"model": "FCOS-ResNet50-FPN", "lr": 0.001, "batch_size": 8, "epochs": 100, "optimizer": "SGD", "weight_decay": 1e-4, "clip_norm": 1.0})
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'[FCOS] Device: {device}')
 

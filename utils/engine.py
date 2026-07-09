@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import wandb
 from collections import defaultdict
 
 import torch
@@ -53,11 +54,13 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, p
             loss_keys = list(loss_dict.keys())
 
         if i % print_freq == 0:
+            wandb.log({"step_loss": losses.item(), "step": i + epoch * len(data_loader)})
             elapsed = time.time() - start_time
             log = f'  Epoch [{epoch}] Step [{i}/{len(data_loader)}] Loss: {losses.item():.4f} | Time: {elapsed:.1f}s'
             print(log)
 
     avg_loss = total_loss / len(data_loader)
+    wandb.log({"epoch_loss": avg_loss, "epoch": epoch})
     print(f'  Epoch [{epoch}] Avg Loss: {avg_loss:.4f}')
     return avg_loss
 
