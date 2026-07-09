@@ -61,7 +61,7 @@ def train():
         collate_fn=collate_fn, num_workers=4,
     )
 
-    model = detr_resnet50(weights=None, num_classes=3)
+    model = detr_resnet50(weights_backbone="DEFAULT", num_classes=3)
     model.to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
@@ -106,7 +106,7 @@ def evaluate_model():
         collate_fn=collate_fn, num_workers=4,
     )
 
-    model = detr_resnet50(weights=None, num_classes=3)
+    model = detr_resnet50(weights_backbone="DEFAULT", num_classes=3)
     model.load_state_dict(torch.load(f'{RESULTS_DIR}/weights/best_model.pth',
                                      map_location=device, weights_only=True))
     model.to(device)
@@ -151,7 +151,7 @@ def run_xai():
     print('\n[DETR] Generating XAI attention maps...')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = detr_resnet50(weights=None, num_classes=3)
+    model = detr_resnet50(weights_backbone="DEFAULT", num_classes=3)
     model.load_state_dict(torch.load(f'{RESULTS_DIR}/weights/best_model.pth',
                                      map_location=device, weights_only=True))
     model.to(device)
