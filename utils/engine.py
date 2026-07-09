@@ -17,7 +17,7 @@ import seaborn as sns
 CLASS_NAMES = ['Background', 'ActiveTuberculosis', 'ObsoletePulmonaryTuberculosis']
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, print_freq=50):
+def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, print_freq=50, clip_norm=None):
     model.train()
     total_loss = 0
     loss_keys = None
@@ -32,6 +32,9 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, p
                 loss_dict = model(images, targets)
                 losses = sum(loss_dict.values())
             scaler.scale(losses).backward()
+            if clip_norm is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
             scaler.step(optimizer)
             scaler.update()
         else:
@@ -39,6 +42,8 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, p
             losses = sum(loss_dict.values())
             optimizer.zero_grad()
             losses.backward()
+            if clip_norm is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
             optimizer.step()
 
         optimizer.zero_grad()

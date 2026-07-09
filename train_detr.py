@@ -74,7 +74,7 @@ def train():
     best_epoch = -1
 
     for epoch in range(1, 101):
-        train_one_epoch(model, optimizer, train_loader, device, epoch, scaler=scaler)
+        train_one_epoch(model, optimizer, train_loader, device, epoch, scaler=scaler, clip_norm=1.0)
         lr_scheduler.step()
 
         print(f'\n[DETR] Validation after epoch {epoch}...')

@@ -62,7 +62,7 @@ def train():
     model.to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=1e-4)
+    optimizer = torch.optim.SGD(params, lr=0.001, momentum=0.9, weight_decay=1e-4)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
 
     scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
@@ -71,7 +71,7 @@ def train():
     best_epoch = -1
 
     for epoch in range(1, 101):
-        train_one_epoch(model, optimizer, train_loader, device, epoch, scaler=scaler)
+        train_one_epoch(model, optimizer, train_loader, device, epoch, scaler=scaler, clip_norm=1.0)
         lr_scheduler.step()
 
         print(f'\n[RetinaNet] Validation after epoch {epoch}...')

@@ -110,6 +110,8 @@ def train():
                     loss_dict, _ = model(images, cls_targets, box_targets)
                 loss = sum(loss_dict.values())
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
@@ -117,6 +119,7 @@ def train():
                 loss_dict, _ = model(images, cls_targets, box_targets)
                 loss = sum(loss_dict.values())
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
 
             total_loss += loss.item()
