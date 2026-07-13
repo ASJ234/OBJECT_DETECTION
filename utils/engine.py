@@ -1,28 +1,122 @@
+# =============================================================================
+# Section 1: Imports, utility classes, reproducibility, metric trackers, checkpoints
+# =============================================================================
 import os
 import json
+import csv
 import time
-import wandb
+import random
+import copy
+import logging
 from collections import defaultdict
+from pathlib import Path
 
 import torch
+import torch.nn as nn
 import torchvision
 import numpy as np
-from torchvision.ops import box_iou
+from torchvision.ops import box_iou, nms
+from scipy.optimize import linear_sum_assignment
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
+import wandb
 
 CLASS_NAMES = ['Background', 'ActiveTuberculosis', 'ObsoletePulmonaryTuberculosis']
+NUM_CLASSES = 3
+
+logger = logging.getLogger(__name__)
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, print_freq=50, clip_norm=None):
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+class MetricTracker:
+    def __init__(self):
+        self.history = defaultdict(list)
+
+    def update(self, **metrics):
+        for k, v in metrics.items():
+            self.history[k].append(v)
+
+    def average(self, last_n=None):
+        avgs = {}
+        for k, vals in self.history.items():
+            subset = vals[-last_n:] if last_n else vals
+            avgs[k] = sum(subset) / len(subset) if subset else 0.0
+        return avgs
+
+    def best(self, metric, mode='max'):
+        vals = self.history.get(metric, [])
+        if not vals:
+            return None, None
+        idx = int(np.argmax(vals)) if mode == 'max' else int(np.argmin(vals))
+        return vals[idx], idx
+
+    def state_dict(self):
+        return dict(self.history)
+
+    def load_state_dict(self, d):
+        self.history = defaultdict(list, {k: list(v) for k, v in d.items()})
+
+
+def save_checkpoint(model, optimizer, epoch, metrics, path,
+                    scaler=None, scheduler=None, extra=None):
+    state = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'metrics': metrics,
+    }
+    if scaler is not None:
+        state['scaler_state_dict'] = scaler.state_dict()
+    if scheduler is not None:
+        state['scheduler_state_dict'] = scheduler.state_dict()
+    if extra is not None:
+        state.update(extra)
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    torch.save(state, path)
+    logger.info(f'Checkpoint saved: {path}')
+
+
+def load_checkpoint(path, model, optimizer=None, scaler=None, scheduler=None):
+    ckpt = torch.load(path, map_location='cpu', weights_only=False)
+    model.load_state_dict(ckpt['model_state_dict'])
+    if optimizer is not None and 'optimizer_state_dict' in ckpt:
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+    if scaler is not None and 'scaler_state_dict' in ckpt:
+        scaler.load_state_dict(ckpt['scaler_state_dict'])
+    if scheduler is not None and 'scheduler_state_dict' in ckpt:
+        scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+    logger.info(f'Checkpoint loaded: {path} (epoch {ckpt.get("epoch", "?")})')
+    return ckpt
+
+
+# =============================================================================
+# Section 2: Production-grade train_one_epoch
+# =============================================================================
+def train_one_epoch(model, optimizer, data_loader, device, epoch,
+                    scaler=None, print_freq=50, clip_norm=None,
+                    metric_tracker=None, gradient_accumulation_steps=1):
     model.train()
-    total_loss = 0
+    total_loss = 0.0
     loss_keys = None
+    loss_accum = defaultdict(float)
+    num_batches = 0
     start_time = time.time()
+    grad_norms = []
+    accum_count = 0
+
+    optimizer.zero_grad()
 
     for i, (images, targets) in enumerate(data_loader):
         images = [img.to(device) for img in images]
@@ -31,59 +125,157 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, scaler=None, p
         if scaler is not None:
             with torch.amp.autocast(device_type='cuda'):
                 loss_dict = model(images, targets)
-                losses = sum(loss_dict.values())
+                losses = sum(loss_dict.values()) / gradient_accumulation_steps
+            if not torch.isfinite(losses):
+                logger.warning(f'NaN/Inf loss at step {i}, skipping batch')
+                for k, v in loss_dict.items():
+                    logger.warning(f'  {k}: {v.item():.6f}')
+                optimizer.zero_grad()
+                continue
             scaler.scale(losses).backward()
-            if clip_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-            scaler.step(optimizer)
-            scaler.update()
         else:
             loss_dict = model(images, targets)
-            losses = sum(loss_dict.values())
-            optimizer.zero_grad()
+            losses = sum(loss_dict.values()) / gradient_accumulation_steps
+            if not torch.isfinite(losses):
+                logger.warning(f'NaN/Inf loss at step {i}, skipping batch')
+                for k, v in loss_dict.items():
+                    logger.warning(f'  {k}: {v.item():.6f}')
+                optimizer.zero_grad()
+                continue
             losses.backward()
-            if clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-            optimizer.step()
 
-        optimizer.zero_grad()
-        total_loss += losses.item()
+        accum_count += 1
+        total_loss += losses.item() * gradient_accumulation_steps
+        num_batches += 1
 
         if loss_keys is None:
             loss_keys = list(loss_dict.keys())
+        for k, v in loss_dict.items():
+            loss_accum[k] += v.item()
 
-        if i % print_freq == 0:
-            wandb.log({"step_loss": losses.item(), "step": i + epoch * len(data_loader)})
+        if accum_count % gradient_accumulation_steps == 0:
+            if clip_norm is not None:
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), clip_norm)
+                grad_norms.append(grad_norm.item())
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
+
+        if i % print_freq == 0 and num_batches > 0:
+            lr = optimizer.param_groups[0]['lr']
             elapsed = time.time() - start_time
-            log = f'  Epoch [{epoch}] Step [{i}/{len(data_loader)}] Loss: {losses.item():.4f} | Time: {elapsed:.1f}s'
-            print(log)
+            parts = [f'Epoch [{epoch}] Step [{i}/{len(data_loader)}]',
+                     f'Loss: {losses.item() * gradient_accumulation_steps:.4f}',
+                     f'LR: {lr:.2e}',
+                     f'Time: {elapsed:.1f}s']
+            if gradient_accumulation_steps > 1:
+                parts.append(f'Accum: {accum_count}/{gradient_accumulation_steps}')
+            print(' | '.join(parts))
+            wandb.log({
+                'step_loss': losses.item() * gradient_accumulation_steps,
+                'step': i + epoch * len(data_loader),
+                'learning_rate': lr,
+            })
 
-    avg_loss = total_loss / len(data_loader)
-    wandb.log({"epoch_loss": avg_loss, "epoch": epoch})
-    print(f'  Epoch [{epoch}] Avg Loss: {avg_loss:.4f}')
+    avg_loss = total_loss / max(num_batches, 1)
+    avg_grad_norm = float(np.mean(grad_norms)) if grad_norms else 0.0
+
+    epoch_metrics = {'epoch_loss': avg_loss, 'avg_grad_norm': avg_grad_norm}
+    if loss_keys:
+        for k in loss_keys:
+            epoch_metrics[f'loss_{k}'] = loss_accum[k] / max(num_batches, 1)
+
+    wandb.log(epoch_metrics)
+    if metric_tracker is not None:
+        metric_tracker.update(**epoch_metrics)
+
+    print(f'  Epoch [{epoch}] Avg Loss: {avg_loss:.4f} | '
+          f'Grad Norm: {avg_grad_norm:.4f}')
     return avg_loss
 
 
+# =============================================================================
+# Section 3: COCO evaluation with per-class metrics, CSV, optional TTA
+# =============================================================================
+def _tta_forward(model, images):
+    outputs = model(images)
+    flipped = [torch.flip(img, dims=[-1]) for img in images]
+    flipped_outputs = model(flipped)
+    merged = []
+    for out, f_out in zip(outputs, flipped_outputs):
+        if len(f_out['boxes']) == 0:
+            merged.append(out)
+            continue
+        img_w = float(out['boxes'][:, 2].max()) + 1.0 if len(out['boxes']) > 0 else 1.0
+        f_boxes = f_out['boxes'].clone()
+        f_boxes[:, [0, 2]] = img_w - f_boxes[:, [2, 0]]
+        all_boxes = torch.cat([out['boxes'], f_boxes])
+        all_scores = torch.cat([out['scores'], f_out['scores']])
+        all_labels = torch.cat([out['labels'], f_out['labels']])
+        keep = nms(all_boxes, all_scores, iou_threshold=0.5)
+        merged.append({
+            'boxes': all_boxes[keep], 'scores': all_scores[keep],
+            'labels': all_labels[keep],
+        })
+    return merged
+
+
+def _compute_per_class_ap(coco_gt, coco_dt, img_ids):
+    per_class = {}
+    cat_ids = coco_gt.getCatIds()
+    for cat_id in cat_ids:
+        ce = COCOeval(coco_gt, coco_dt, iouType='bbox')
+        ce.params.imgIds = img_ids
+        ce.params.catIds = [cat_id]
+        ce.evaluate()
+        ce.accumulate()
+        ce.summarize()
+        cat_name = coco_gt.loadCats(cat_id)[0]['name']
+        per_class[f'AP_{cat_name}'] = float(ce.stats[0]) if len(ce.stats) > 0 else 0.0
+    return per_class
+
+
+def _append_csv(path, **kwargs):
+    file_exists = os.path.exists(path)
+    with open(path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(kwargs.keys()))
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(kwargs)
+
+
 @torch.no_grad()
-def evaluate(model, data_loader, device, output_file=None):
+def evaluate(model, data_loader, device, output_file=None, tta=False):
     model.eval()
     coco_gt = data_loader.dataset.coco
-
     results = []
     img_ids = []
 
     for images, targets in data_loader:
         images = [img.to(device) for img in images]
-        outputs = model(images)
+        outputs = _tta_forward(model, images) if tta else model(images)
 
         for target, output in zip(targets, outputs):
             img_id = target['image_id'].item()
             img_ids.append(img_id)
-
             boxes = output['boxes'].cpu().numpy()
             scores = output['scores'].cpu().numpy()
             labels = output['labels'].cpu().numpy()
+
+            keep = scores >= 0.05
+            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+            if len(boxes) > 0:
+                keep_idx = nms(torch.tensor(boxes), torch.tensor(scores),
+                               iou_threshold=0.5)
+                boxes, scores, labels = (boxes[keep_idx], scores[keep_idx],
+                                         labels[keep_idx])
 
             for box, score, label in zip(boxes, scores, labels):
                 x1, y1, x2, y2 = box
@@ -107,30 +299,30 @@ def evaluate(model, data_loader, device, output_file=None):
     coco_eval.summarize()
 
     stats = coco_eval.stats.tolist()
-
     metrics = {
-        'mAP@0.5:0.95': stats[0],
-        'mAP@0.5': stats[1],
-        'mAP@0.75': stats[2],
-        'mAP_small': stats[3],
-        'mAP_medium': stats[4],
-        'mAP_large': stats[5],
-        'AR@1': stats[6],
-        'AR@10': stats[7],
-        'AR@100': stats[8],
+        'mAP@0.5:0.95': stats[0], 'mAP@0.5': stats[1], 'mAP@0.75': stats[2],
+        'mAP_small': stats[3], 'mAP_medium': stats[4], 'mAP_large': stats[5],
+        'AR@1': stats[6], 'AR@10': stats[7], 'AR@100': stats[8],
     }
 
+    per_class = _compute_per_class_ap(coco_gt, coco_dt, sorted(set(img_ids)))
+    metrics.update(per_class)
+
     if output_file:
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
         with open(output_file, 'w') as f:
-            json.dump({'metrics': metrics, 'predictions': results}, f, indent=2)
-        print(f'[EVAL] Predictions saved to {output_file}')
+            json.dump({'metrics': metrics, 'per_class': per_class,
+                       'predictions': results}, f, indent=2)
+        csv_path = output_file.replace('.json', '_log.csv')
+        _append_csv(csv_path, epoch=0, **metrics)
+        print(f'[EVAL] Saved {output_file} and {csv_path}')
 
     return coco_eval
 
 
 @torch.no_grad()
-def evaluate_test(model, data_loader, device, output_file):
+def evaluate_test(model, data_loader, device, output_file, model_name="unknown"):
+    import datetime
     model.eval()
     results = []
 
@@ -154,16 +346,28 @@ def evaluate_test(model, data_loader, device, output_file):
                     'category_id': int(label),
                 })
 
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output = {
+        'model': model_name,
+        'dataset': 'TBX11K',
+        'num_predictions': len(results),
+        'date': datetime.datetime.now().isoformat(),
+        'predictions': results,
+    }
+
+    os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
     with open(output_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(output, f, indent=2)
     print(f'[TEST] {len(results)} predictions saved to {output_file}')
 
 
+# =============================================================================
+# Section 4: Hungarian-matching confusion matrix with per-class metrics
+# =============================================================================
 @torch.no_grad()
-def compute_confusion_matrix(model, data_loader, device, iou_thresh=0.5, score_thresh=0.05):
+def compute_confusion_matrix(model, data_loader, device,
+                             iou_thresh=0.5, score_thresh=0.05):
     model.eval()
-    confusion = np.zeros((3, 3), dtype=int)
+    confusion = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=int)
 
     for images, targets in data_loader:
         images = [img.to(device) for img in images]
@@ -182,34 +386,28 @@ def compute_confusion_matrix(model, data_loader, device, iou_thresh=0.5, score_t
             matched_pred = set()
 
             if len(gt_boxes) > 0 and len(pred_boxes) > 0:
-                iou_matrix = box_iou(gt_boxes, pred_boxes)
-                for gt_idx in range(len(gt_boxes)):
-                    best_pred = -1
-                    best_iou = iou_thresh
-                    for pred_idx in range(len(pred_boxes)):
-                        if pred_idx not in matched_pred:
-                            iou = iou_matrix[gt_idx, pred_idx].item()
-                            if iou > best_iou:
-                                best_iou = iou
-                                best_pred = pred_idx
+                iou_matrix = box_iou(gt_boxes, pred_boxes).numpy()
+                cost_matrix = np.where(iou_matrix >= iou_thresh,
+                                       iou_matrix, 0.0)
 
-                    if best_pred >= 0:
-                        gt_cls = gt_labels[gt_idx].item()
-                        pred_cls = pred_labels[best_pred].item()
-                        confusion[gt_cls, pred_cls] += 1
-                        matched_gt.add(gt_idx)
-                        matched_pred.add(best_pred)
-                    else:
-                        confusion[gt_labels[gt_idx].item(), 0] += 1
-                        matched_gt.add(gt_idx)
+                if cost_matrix.sum() > 0:
+                    gt_idx, pred_idx = linear_sum_assignment(
+                        cost_matrix, maximize=True)
+                    for gi, pi in zip(gt_idx, pred_idx):
+                        if iou_matrix[gi, pi] >= iou_thresh:
+                            gt_cls = gt_labels[gi].item()
+                            pred_cls = pred_labels[pi].item()
+                            confusion[gt_cls, pred_cls] += 1
+                            matched_gt.add(gi)
+                            matched_pred.add(pi)
 
-            for gt_idx in range(len(gt_boxes)):
-                if gt_idx not in matched_gt:
-                    confusion[gt_labels[gt_idx].item(), 0] += 1
+            for gi in range(len(gt_boxes)):
+                if gi not in matched_gt:
+                    confusion[gt_labels[gi].item(), 0] += 1
 
-            for pred_idx in range(len(pred_boxes)):
-                if pred_idx not in matched_pred:
-                    confusion[0, pred_labels[pred_idx].item()] += 1
+            for pi in range(len(pred_boxes)):
+                if pi not in matched_pred:
+                    confusion[0, pred_labels[pi].item()] += 1
 
     return confusion
 
@@ -218,8 +416,7 @@ def save_confusion_matrix_plot(confusion, output_path, class_names=None):
     if class_names is None:
         class_names = CLASS_NAMES
 
-    fig, ax = plt.subplots(figsize=(7, 6))
-
+    fig, ax = plt.subplots(figsize=(8, 7))
     total_per_row = confusion.sum(axis=1, keepdims=True)
     total_per_row = np.where(total_per_row == 0, 1, total_per_row)
     confusion_norm = confusion / total_per_row
@@ -227,32 +424,86 @@ def save_confusion_matrix_plot(confusion, output_path, class_names=None):
     sns.heatmap(confusion_norm, annot=confusion, fmt='d', cmap='Blues',
                 xticklabels=class_names, yticklabels=class_names,
                 ax=ax, cbar_kws={'label': 'Fraction'})
-
     ax.set_xlabel('Predicted')
     ax.set_ylabel('Ground Truth')
-    ax.set_title(f'Confusion Matrix (IoU ≥ 0.5, score ≥ 0.05)\n'
-                 f'TP=$\\Sigma$diag | FP=col0 | FN=row0')
+    ax.set_title('Confusion Matrix (Hungarian Match, IoU >= 0.5)')
 
     plt.tight_layout()
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     plt.savefig(output_path, dpi=150)
     plt.close()
     print(f'[CONFUSION] Saved to {output_path}')
 
-    tp = confusion[1, 1] + confusion[2, 2]
-    fp_bg = confusion[0, 1] + confusion[0, 2]
-    fn_bg = confusion[1, 0] + confusion[2, 0]
+    print('\n--- Per-Class Metrics (Hungarian) ---')
+    results = {}
+    for cls_idx in range(1, NUM_CLASSES):
+        tp = int(confusion[cls_idx, cls_idx])
+        fp = int(confusion[:, cls_idx].sum() - tp)
+        fn = int(confusion[cls_idx, :].sum() - tp)
+        tn = int(confusion.sum() - tp - fp - fn)
 
-    print(f'  TP (correct detections): {tp}')
-    print(f'  FP (false positives):    {fp_bg}')
-    print(f'  FN (false negatives):    {fn_bg}')
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * precision * recall / (precision + recall)
+              if (precision + recall) > 0 else 0.0)
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        balanced_acc = (recall + specificity) / 2.0
 
-    for cls_idx in [1, 2]:
-        denom_p = confusion[:, cls_idx].sum()
-        denom_r = confusion[cls_idx, :].sum()
-        prec = confusion[cls_idx, cls_idx] / denom_p if denom_p > 0 else 0
-        rec = confusion[cls_idx, cls_idx] / denom_r if denom_r > 0 else 0
-        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
-        print(f'  {CLASS_NAMES[cls_idx]}: P={prec:.3f} R={rec:.3f} F1={f1:.3f}')
+        name = class_names[cls_idx] if cls_idx < len(class_names) else f'Class{cls_idx}'
+        print(f'  {name}: P={precision:.3f} R={recall:.3f} F1={f1:.3f} '
+              f'Spec={specificity:.3f} BalAcc={balanced_acc:.3f}')
+        results[name] = {
+            'precision': precision, 'recall': recall, 'f1': f1,
+            'specificity': specificity, 'balanced_accuracy': balanced_acc,
+        }
 
-    return confusion
+    return confusion, results
+
+
+# =============================================================================
+# Section 5: Visualization utilities and reporting helpers
+# =============================================================================
+def plot_training_curves(metrics, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    if 'epoch_loss' in metrics.history:
+        axes[0].plot(metrics.history['epoch_loss'], marker='o', color='#4C72B0')
+        axes[0].set_xlabel('Epoch')
+        axes[0].set_ylabel('Loss')
+        axes[0].set_title('Training Loss')
+        axes[0].grid(True, alpha=0.3)
+
+    if 'learning_rate' in metrics.history:
+        axes[1].plot(metrics.history['learning_rate'], marker='s', color='#DD8452')
+        axes[1].set_xlabel('Epoch')
+        axes[1].set_ylabel('Learning Rate')
+        axes[1].set_title('Learning Rate Schedule')
+        axes[1].set_yscale('log')
+        axes[1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(f'{output_dir}/training_curves.png', dpi=150)
+    plt.close()
+    print(f'[VIZ] Training curves saved to {output_dir}/training_curves.png')
+
+
+def generate_summary_report(all_metrics, output_path):
+    lines = ['=' * 70,
+             'TBX11K Object Detection - Model Comparison Report',
+             '=' * 70, '']
+    for model_name, m in all_metrics.items():
+        lines.append(f'--- {model_name.upper()} ---')
+        for k, v in m.items():
+            if isinstance(v, float):
+                lines.append(f'  {k}: {v:.4f}')
+            else:
+                lines.append(f'  {k}: {v}')
+        lines.append('')
+
+    report = '\n'.join(lines)
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+    with open(output_path, 'w') as f:
+        f.write(report)
+    print(f'[REPORT] Saved to {output_path}')
+    return report
