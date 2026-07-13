@@ -276,6 +276,9 @@ def evaluate(model, data_loader, device, output_file=None, tta=False):
                                iou_threshold=0.5)
                 boxes, scores, labels = (boxes[keep_idx], scores[keep_idx],
                                          labels[keep_idx])
+                boxes = np.atleast_2d(boxes)
+                scores = np.atleast_1d(scores)
+                labels = np.atleast_1d(labels)
 
             for box, score, label in zip(boxes, scores, labels):
                 x1, y1, x2, y2 = box
