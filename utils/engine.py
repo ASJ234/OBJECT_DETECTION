@@ -256,10 +256,33 @@ def evaluate(model, data_loader, device, output_file=None, tta=False):
     coco_gt = data_loader.dataset.coco
     results = []
     img_ids = []
+    _debug_done = False
 
     for images, targets in data_loader:
         images = [img.to(device) for img in images]
         outputs = _tta_forward(model, images) if tta else model(images)
+
+        if not _debug_done and len(outputs) > 0:
+            out = outputs[0]
+            tgt = targets[0]
+            n_pred = len(out['boxes'])
+            n_gt = len(tgt['boxes'])
+            print(f'[DEBUG] n_pred={n_pred} n_gt={n_gt}')
+            if n_pred > 0:
+                print(f'[DEBUG] pred_boxes_range: x[{out["boxes"][:,0].min():.1f}-{out["boxes"][:,0].max():.1f}] '
+                      f'y[{out["boxes"][:,1].min():.1f}-{out["boxes"][:,1].max():.1f}]')
+                print(f'[DEBUG] pred_labels: {out["labels"][:10].cpu().numpy()}')
+                print(f'[DEBUG] pred_scores: {out["scores"][:5].cpu().numpy()}')
+                print(f'[DEBUG] pred_boxes[:3]: {out["boxes"][:3].cpu().numpy()}')
+            if n_gt > 0:
+                print(f'[DEBUG] gt_boxes_range:  x[{tgt["boxes"][:,0].min():.1f}-{tgt["boxes"][:,0].max():.1f}] '
+                      f'y[{tgt["boxes"][:,1].min():.1f}-{tgt["boxes"][:,1].max():.1f}]')
+                print(f'[DEBUG] gt_labels:  {tgt["labels"][:10].numpy()}')
+                print(f'[DEBUG] gt_boxes[:3]: {tgt["boxes"][:3].numpy()}')
+            if n_pred > 0 and n_gt > 0:
+                ious = box_iou(tgt['boxes'], out['boxes'][:20]).numpy()
+                print(f'[DEBUG] max_iou_with_any_gt: {ious.max(axis=0)[:5]}')
+            _debug_done = True
 
         for target, output in zip(targets, outputs):
             img_id = target['image_id'].item()

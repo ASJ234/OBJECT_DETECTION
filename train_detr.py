@@ -62,7 +62,7 @@ DEFAULT_CONFIG = {
         "weight_decay": 1e-4,
         "clip_norm": 0.1,
         "warmup_epochs": 10,
-        "ema_decay": 0.999,
+        "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
         "seed": 42,
@@ -358,7 +358,7 @@ def train(cfg):
         ema.update(model)
 
         print(f"\n[DETR] Validation after epoch {epoch}...")
-        coco_eval = evaluate(ema.model, val_loader, device)
+        coco_eval = evaluate(model, val_loader, device)
 
         current_map = 0.0
         if coco_eval is not None:

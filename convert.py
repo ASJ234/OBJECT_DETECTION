@@ -24,7 +24,7 @@ def convert_to_coco(splits):
     for split in splits:
         images = []
         annotations = []
-        ann_id = 0
+        ann_id = 1
 
         ann_dir = os.path.join(DATA_ROOT, split, 'ann')
         img_dir = os.path.join(DATA_ROOT, split, 'img')
@@ -35,35 +35,54 @@ def convert_to_coco(splits):
             with open(f) as fh:
                 d = json.load(fh)
 
-            basename = os.path.basename(f).replace('.png.json', '.png')
-            img_id = len(images)
-
-            images.append({
-                'id': img_id,
-                'file_name': basename,
-                'width': d['size']['width'],
-                'height': d['size']['height'],
-            })
+            basename = os.path.basename(f).replace('.json', '')
+            img_id = len(images) + 1
 
             src_path = os.path.join(img_dir, basename)
+            if not os.path.exists(src_path):
+                print(f'[WARN] Image not found: {src_path}, skipping')
+                continue
+
             dst_path = os.path.join(out_img_dir, basename)
             if not os.path.exists(dst_path):
                 shutil.copy2(src_path, dst_path)
 
+            w_img = d['size']['width']
+            h_img = d['size']['height']
+
+            images.append({
+                'id': img_id,
+                'file_name': basename,
+                'width': w_img,
+                'height': h_img,
+            })
+
             for obj in d.get('objects', []):
+                if obj.get('classTitle') not in CLASS_MAP:
+                    continue
                 ext = obj['points']['exterior']
+                if len(ext) < 2:
+                    continue
                 x1, y1 = ext[0]
                 x2, y2 = ext[1]
-                w = x2 - x1
-                h = y2 - y1
+                x_min, x_max = min(x1, x2), max(x1, x2)
+                y_min, y_max = min(y1, y2), max(y1, y2)
+                w = x_max - x_min
+                h = y_max - y_min
+                if w <= 0 or h <= 0:
+                    continue
+                x_min = max(0, min(x_min, w_img))
+                y_min = max(0, min(y_min, h_img))
+                w = min(w, w_img - x_min)
+                h = min(h, h_img - y_min)
                 if w <= 0 or h <= 0:
                     continue
 
                 annotations.append({
                     'id': ann_id,
                     'image_id': img_id,
-                    'bbox': [x1, y1, w, h],
-                    'area': w * h,
+                    'bbox': [float(x_min), float(y_min), float(w), float(h)],
+                    'area': float(w * h),
                     'category_id': CLASS_MAP[obj['classTitle']],
                     'iscrowd': 0,
                 })

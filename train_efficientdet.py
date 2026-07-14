@@ -68,7 +68,7 @@ DEFAULT_CONFIG = {
         "weight_decay": 1e-4,
         "clip_norm": 1.0,
         "warmup_epochs": 5,
-        "ema_decay": 0.999,
+        "ema_decay": 0.99,
         "early_stop_patience": 15,
         "save_every": 10,
         "seed": 42,

@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
         "momentum": 0.9,
         "clip_norm": 1.0,
         "warmup_epochs": 5,
-        "ema_decay": 0.999,
+        "ema_decay": 0.99,
         "early_stop_patience": 15,
         "save_every": 10,
         "seed": 42,
@@ -374,7 +374,7 @@ def train(cfg):
         ema.update(model)
 
         print(f"\n[RetinaNet] Validation after epoch {epoch}...")
-        coco_eval = evaluate(ema.model, val_loader, device)
+        coco_eval = evaluate(model, val_loader, device)
 
         current_map = 0.0
         if coco_eval is not None:
