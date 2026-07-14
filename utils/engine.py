@@ -279,7 +279,7 @@ def evaluate(model, data_loader, device, output_file=None, tta=False):
                     print(f'[DEBUG] pred_scores: {out["scores"][:5].cpu().numpy()}')
                     print(f'[DEBUG] pred_boxes[:3]: {out["boxes"][:3].cpu().numpy()}')
                     print(f'[DEBUG] gt_boxes[:3]: {tgt["boxes"][:3].numpy()}')
-                    ious = box_iou(tgt['boxes'], out['boxes'][:20]).numpy()
+                    ious = box_iou(tgt['boxes'].to(out['boxes'].device), out['boxes'][:20]).cpu().numpy()
                     print(f'[DEBUG] max_iou_per_pred: {ious.max(axis=0)[:5]}')
                     print(f'[DEBUG] max_iou_per_gt:  {ious.max(axis=1)[:5]}')
                     _debug_done = True
