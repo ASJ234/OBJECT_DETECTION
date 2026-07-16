@@ -10,7 +10,7 @@ class ModelEMA:
     At evaluation, use `ema.model` instead of the raw model.
     """
 
-    def __init__(self, model, decay=0.999):
+    def __init__(self, model, decay=0.99):
         self.decay = decay
         self.model = copy.deepcopy(model)
         self.model.eval()

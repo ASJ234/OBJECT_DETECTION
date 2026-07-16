@@ -230,7 +230,7 @@ def train(cfg):
     print(f"[FCOS] Device: {device}")
 
     wandb.init(
-        mode=os.environ.get("WANDB_MODE", "online"), project="tbx11k", name="fcos",
+        mode=os.environ.get("WANDB_MODE", "offline"), project="tbx11k", name="fcos",
         config=cfg,
     )
 

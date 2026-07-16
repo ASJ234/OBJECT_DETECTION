@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw
 sns.set_style('whitegrid')
 plt.rcParams.update({'font.size': 12, 'figure.dpi': 150})
 
-DATA_ROOT = 'Images'
+DATA_ROOT = 'images'
 OUTPUT_DIR = 'results/eda'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -148,8 +148,8 @@ def plot_bbox_spatial_heatmap(records):
                                               range=[[0, 1], [0, 1]])
     ax.imshow(heatmap.T, origin='lower', cmap='hot', interpolation='bilinear',
               extent=[0, 1, 0, 1])
-    ax.set_xlabel('Normalized X (left → right)')
-    ax.set_ylabel('Normalized Y (top → bottom)')
+    ax.set_xlabel('Normalized X (left -> right)')
+    ax.set_ylabel('Normalized Y (top -> bottom)')
     ax.set_title('Bounding Box Center Spatial Distribution\n(Train + Val)')
     plt.colorbar(plt.cm.ScalarMappable(cmap='hot'), ax=ax, label='Count')
     plt.tight_layout()
@@ -298,6 +298,11 @@ def plot_sample_grid(records):
 
 def print_dataset_summary(records):
     total = len(records)
+    if total == 0:
+        print('No annotation files found. Check that the Images/ directory exists '
+              'and contains train/ann/, val/ann/, test/ann/ with .json files.')
+        return
+
     splits = Counter(r['split'] for r in records)
     total_with_boxes = sum(1 for r in records if r['objs'])
     total_boxes = sum(len(r['objs']) for r in records)
@@ -337,12 +342,12 @@ def print_dataset_summary(records):
 
     lines.extend([
         '',
-        'Tag → Box mapping (train+val):',
-        '  active_tb         → 100% ActiveTuberculosis',
-        '  latent_tb         → 100% ObsoletePulmonaryTuberculosis',
-        '  active&latent_tb  → Both classes (~50/50)',
-        '  healthy           → No boxes',
-        '  sick_but_non-tb   → No boxes',
+        'Tag -> Box mapping (train+val):',
+        '  active_tb         -> 100% ActiveTuberculosis',
+        '  latent_tb         -> 100% ObsoletePulmonaryTuberculosis',
+        '  active&latent_tb  -> Both classes (~50/50)',
+        '  healthy           -> No boxes',
+        '  sick_but_non-tb   -> No boxes',
         '',
         'Test set: 3302 images with no tags and no boxes — inference only.',
         '=' * 60,
@@ -361,6 +366,8 @@ def main():
     print(f'Loaded {len(records)} annotation files.\n')
 
     print_dataset_summary(records)
+    if not records:
+        return
     print()
     plot_tag_distribution(records)
     plot_bbox_class_distribution(records)
