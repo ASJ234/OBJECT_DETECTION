@@ -6,7 +6,7 @@ import argparse
 
 from PIL import Image
 
-DATA_ROOT = 'Images'
+DATA_ROOT = 'images'
 OUTPUT_DIR = 'dataset'
 
 CLASS_MAP = {
@@ -100,12 +100,12 @@ def convert_to_coco(splits):
         out_path = os.path.join(OUTPUT_DIR, 'coco', f'{split}.json')
         with open(out_path, 'w') as f:
             json.dump(out, f)
-        print(f'[COCO] {split}: {len(images)} images, {len(annotations)} annotations → {out_path}')
+        print(f'[COCO] {split}: {len(images)} images, {len(annotations)} annotations -> {out_path}')
 
 
 def main():
     parser = argparse.ArgumentParser(description='Convert TBX11K annotations to COCO format')
-    parser.add_argument('--data-root', type=str, default='Images', help='Path to Images directory')
+    parser.add_argument('--data-root', type=str, default='images', help='Path to images directory')
     parser.add_argument('--output-dir', type=str, default='dataset', help='Output directory')
     args = parser.parse_args()
 

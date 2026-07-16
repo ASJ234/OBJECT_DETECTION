@@ -19,7 +19,7 @@ import torch.nn as nn
 import numpy as np
 import wandb
 from torch.utils.data import DataLoader
-from torchvision.models.detection import detr_resnet50
+from transformers import DetrForObjectDetection, DetrImageProcessor
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     },
     "training": {
         "epochs": 150,
-        "batch_size": 4,
+        "batch_size": 8,
         "lr_backbone": 1e-5,
         "lr_transformer": 1e-4,
         "lr_head": 1e-4,
@@ -186,33 +186,128 @@ class AugmentedTransform:
 
 
 # =============================================================================
+# HuggingFace DETR Wrapper — adapts HF DETR to torchvision-style API
+# =============================================================================
+class DetrHFWrapper(torch.nn.Module):
+    """Wraps HuggingFace DetrForObjectDetection to match torchvision detection API.
+
+    Training: model(images, targets) -> dict of losses
+    Eval:     model(images) -> list of {"boxes", "scores", "labels"}
+    """
+
+    def __init__(self, hf_model, num_classes, id2label):
+        super().__init__()
+        self.hf_model = hf_model
+        self.num_classes = num_classes
+        self.id2label = id2label
+        self._training = False
+
+    def train(self, mode=True):
+        self._training = mode
+        self.hf_model.train(mode)
+        return self
+
+    def eval(self):
+        self._training = False
+        self.hf_model.eval()
+        return self
+
+    def parameters(self, recurse=True):
+        return self.hf_model.parameters(recurse=recurse)
+
+    def state_dict(self, *args, **kwargs):
+        return self.hf_model.state_dict(*args, **kwargs)
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        return self.hf_model.load_state_dict(state_dict, *args, **kwargs)
+
+    def forward(self, images, targets=None):
+        if isinstance(images, torch.Tensor):
+            if images.dim() == 3:
+                images = [images]
+            elif images.dim() == 4:
+                images = list(images)
+        if self._training and targets is not None:
+            return self._forward_train(images, targets)
+        else:
+            return self._forward_eval(images)
+
+    def _prepare_pixel_values(self, images):
+        """Convert list of CxHxW tensors to pixel_values batch for HF DETR."""
+        pixel_values = torch.stack(images, dim=0)
+        return pixel_values
+
+    def _forward_train(self, images, targets):
+        pixel_values = self._prepare_pixel_values(images)
+        labels = []
+        for t in targets:
+            h, w = images[0].shape[1], images[0].shape[2]
+            box_norm = t["boxes"].clone()
+            box_norm[:, 0] /= w
+            box_norm[:, 2] /= w
+            box_norm[:, 1] /= h
+            box_norm[:, 3] /= h
+            labels.append({
+                "class_labels": t["labels"] - 1,
+                "boxes": box_norm,
+                "image_id": t["image_id"],
+                "area": t["area"],
+                "iscrowd": t["iscrowd"],
+            })
+        outputs = self.hf_model(pixel_values=pixel_values, labels=labels)
+        loss_dict = outputs.loss_dict
+        return dict(loss_dict)
+
+    @torch.no_grad()
+    def _forward_eval(self, images):
+        pixel_values = self._prepare_pixel_values(images)
+        outputs = self.hf_model(pixel_values=pixel_values)
+        logits = outputs.logits
+        pred_boxes = outputs.pred_boxes
+        h, w = images[0].shape[1], images[0].shape[2]
+        results = []
+        for i in range(logits.shape[0]):
+            probs = torch.softmax(logits[i], dim=-1)
+            scores, labels = probs[:, :-1].max(dim=-1)
+            labels = labels + 1
+            boxes = pred_boxes[i]
+            boxes_abs = boxes.clone()
+            boxes_abs[:, 0] *= w
+            boxes_abs[:, 2] *= w
+            boxes_abs[:, 1] *= h
+            boxes_abs[:, 3] *= h
+            x1y1x2y2 = torch.zeros_like(boxes_abs)
+            x1y1x2y2[:, 0] = boxes_abs[:, 0] - boxes_abs[:, 2] / 2
+            x1y1x2y2[:, 1] = boxes_abs[:, 1] - boxes_abs[:, 3] / 2
+            x1y1x2y2[:, 2] = boxes_abs[:, 0] + boxes_abs[:, 2] / 2
+            x1y1x2y2[:, 3] = boxes_abs[:, 1] + boxes_abs[:, 3] / 2
+            results.append({
+                "boxes": x1y1x2y2,
+                "scores": scores,
+                "labels": labels,
+            })
+        return results
+
+
+# =============================================================================
 # Build DETR with COCO-pretrained weights
 # =============================================================================
 def build_detr(cfg):
     num_classes = cfg["model"]["num_classes"]
-    use_pretrained = False
+    id2label = {0: "ActiveTuberculosis", 1: "ObsoletePulmonaryTuberculosis"}
+    label2id = {v: k for k, v in id2label.items()}
+    num_labels = len(id2label)
 
-    try:
-        model = detr_resnet50(
-            weights="DEFAULT", num_classes=num_classes,
-        )
-        use_pretrained = True
-        print("  Loaded COCO-pretrained DETR (backbone + transformer + head)")
-    except Exception:
-        try:
-            model = detr_resnet50(
-                weights_backbone="DEFAULT", num_classes=num_classes,
-            )
-            use_pretrained = True
-            print("  Loaded backbone-only pretrained weights")
-        except Exception:
-            import warnings
-            warnings.warn("Could not load pretrained weights, using random init. Disabling AMP.")
-            model = detr_resnet50(
-                weights_backbone=None, num_classes=num_classes,
-            )
-
-    return model, use_pretrained
+    hf_model = DetrForObjectDetection.from_pretrained(
+        "facebook/detr-resnet-50",
+        num_labels=num_classes,
+        id2label=id2label,
+        label2id=label2id,
+        ignore_mismatched_sizes=True,
+    )
+    print("  Loaded HuggingFace DETR-ResNet50 (COCO-pretrained)")
+    wrapper = DetrHFWrapper(hf_model, num_classes, id2label)
+    return wrapper, True
 
 
 # =============================================================================
@@ -223,12 +318,13 @@ def get_param_groups(model, cfg):
     transformer_params = []
     head_params = []
 
-    for name, param in model.named_parameters():
+    raw = model.hf_model if hasattr(model, "hf_model") else model
+    for name, param in raw.named_parameters():
         if not param.requires_grad:
             continue
         if "backbone" in name:
             backbone_params.append(param)
-        elif "transformer" in name:
+        elif "encoder" in name or "decoder" in name or "query_position" in name or "input_projection" in name:
             transformer_params.append(param)
         else:
             head_params.append(param)

@@ -8,7 +8,10 @@ class DETRAttentionExtractor:
         self.model = model
         self._attention_weights = None
 
-        decoder_layer = model.transformer.decoder.layers[-1]
+        if hasattr(model, "hf_model"):
+            decoder_layer = model.hf_model.model.decoder.layers[-1]
+        else:
+            decoder_layer = model.transformer.decoder.layers[-1]
         self._handle = decoder_layer.multihead_attn.register_forward_hook(
             self._hook_attention
         )

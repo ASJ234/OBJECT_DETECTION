@@ -20,10 +20,10 @@ import numpy as np
 import wandb
 from torch.utils.data import DataLoader
 import torchvision.transforms.functional as TF
+import torch.nn.functional as F_interp
 
 try:
-    from effdet import create_model
-    from effdet.efficientdet import DetBenchTrain
+    from effdet import create_model, DetBenchTrain
     HAS_EFFDET = True
 except ImportError:
     HAS_EFFDET = False
@@ -62,7 +62,7 @@ DEFAULT_CONFIG = {
     },
     "training": {
         "epochs": 100,
-        "batch_size": 4,
+        "batch_size": 16,
         "lr": 1e-4,
         "lr_backbone": 1e-5,
         "weight_decay": 1e-4,
@@ -89,7 +89,7 @@ DEFAULT_CONFIG = {
         "val_ann": "dataset/coco/val.json",
         "test_images": "dataset/coco/test",
         "test_ann": "dataset/coco/test.json",
-        "num_workers": 2,
+        "num_workers": 0,
     },
     "results_dir": "results/efficientdet",
 }
@@ -199,7 +199,7 @@ def make_collate_fn(img_size=IMG_SIZE):
         scaled_targets = []
         for img, target in zip(images, targets):
             resized.append(
-                TF.interpolate(
+                F_interp.interpolate(
                     img.unsqueeze(0), size=(img_size, img_size),
                     mode="bilinear", align_corners=False,
                 ).squeeze(0)
@@ -343,7 +343,7 @@ def train(cfg):
 
     raw_model, use_pretrained = build_efficientdet(cfg)
     raw_model.to(device)
-    bench_train = DetBenchTrain(raw_model)
+    bench_train = DetBenchTrain(raw_model).to(device)
 
     ema = ModelEMA(raw_model, decay=cfg["training"]["ema_decay"])
 
