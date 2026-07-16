@@ -358,7 +358,7 @@ def train(cfg):
         ema.update(model)
 
         print(f"\n[DETR] Validation after epoch {epoch}...")
-        coco_eval = evaluate(model, val_loader, device)
+        coco_eval = evaluate(ema.model, val_loader, device)
 
         current_map = 0.0
         if coco_eval is not None:
@@ -511,8 +511,9 @@ def evaluate_model(cfg):
         with open(f"{results_dir}/metrics_tta.json", "w") as f:
             json.dump(metrics_tta, f, indent=2)
         print(f"[DETR] TTA metrics saved to {results_dir}/metrics_tta.json")
+        wandb.log({f'tta/{k}': v for k, v in metrics_tta.items()})
 
-    confusion, class_results = compute_confusion_matrix(
+    confusion = compute_confusion_matrix(
         model, val_loader, device,
     )
     save_confusion_matrix_plot(
@@ -698,6 +699,10 @@ def run_xai(cfg):
         count += 1
 
     print(f"[DETR] XAI complete. {count} samples analyzed.")
+    for n in range(max_samples):
+        img_path = f"{results_dir}/explain/sample_{n}.png"
+        if os.path.exists(img_path):
+            wandb.log({f'xai_images/sample_{n}': wandb.Image(img_path)})
 
 
 # =============================================================================

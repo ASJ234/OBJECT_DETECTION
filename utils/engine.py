@@ -335,6 +335,9 @@ def evaluate(model, data_loader, device, output_file=None, tta=False):
     per_class = _compute_per_class_ap(coco_gt, coco_dt, sorted(set(img_ids)))
     metrics.update(per_class)
 
+    wandb_log = {f'val/{k}': v for k, v in metrics.items() if isinstance(v, (int, float))}
+    wandb.log(wandb_log)
+
     if output_file:
         os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
         with open(output_file, 'w') as f:
@@ -458,8 +461,10 @@ def save_confusion_matrix_plot(confusion, output_path, class_names=None):
     plt.tight_layout()
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     plt.savefig(output_path, dpi=150)
-    plt.close()
     print(f'[CONFUSION] Saved to {output_path}')
+
+    wandb.log({'confusion_matrix': wandb.Image(fig)})
+    plt.close()
 
     print('\n--- Per-Class Metrics (Hungarian) ---')
     results = {}
@@ -483,6 +488,14 @@ def save_confusion_matrix_plot(confusion, output_path, class_names=None):
             'precision': precision, 'recall': recall, 'f1': f1,
             'specificity': specificity, 'balanced_accuracy': balanced_acc,
         }
+
+    wandb_log = {}
+    for cls_name, cls_metrics in results.items():
+        short = cls_name.replace('Tuberculosis', 'TB').replace('Pulmonary', 'P')
+        for metric_name, val in cls_metrics.items():
+            wandb_log[f'confusion/{short}_{metric_name}'] = val
+    if wandb_log:
+        wandb.log(wandb_log)
 
     return confusion, results
 
@@ -511,6 +524,7 @@ def plot_training_curves(metrics, output_dir):
 
     plt.tight_layout()
     plt.savefig(f'{output_dir}/training_curves.png', dpi=150)
+    wandb.log({'training_curves': wandb.Image(fig)})
     plt.close()
     print(f'[VIZ] Training curves saved to {output_dir}/training_curves.png')
 

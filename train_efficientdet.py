@@ -633,8 +633,9 @@ def evaluate_model(cfg):
         print(
             f"[EfficientDet] TTA metrics saved to {results_dir}/metrics_tta.json"
         )
+        wandb.log({f'tta/{k}': v for k, v in metrics_tta.items()})
 
-    confusion, class_results = compute_confusion_matrix(
+    confusion = compute_confusion_matrix(
         wrapper, val_loader, device,
     )
     save_confusion_matrix_plot(
@@ -738,6 +739,10 @@ def run_xai(cfg):
 
     gradcam.remove_hooks()
     print("[EfficientDet] XAI complete.")
+    for n in range(max_samples):
+        img_path = f"{results_dir}/explain/sample_{n}.png"
+        if os.path.exists(img_path):
+            wandb.log({f'xai_images/sample_{n}': wandb.Image(img_path)})
 
 
 # =============================================================================

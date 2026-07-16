@@ -54,7 +54,7 @@ DEFAULT_CONFIG = {
     },
     "training": {
         "epochs": 100,
-        "batch_size": 8,
+        "batch_size": 16,
         "lr": 0.005,
         "optimizer": "SGD",
         "weight_decay": 1e-4,
@@ -374,7 +374,7 @@ def train(cfg):
         ema.update(model)
 
         print(f"\n[RetinaNet] Validation after epoch {epoch}...")
-        coco_eval = evaluate(model, val_loader, device)
+        coco_eval = evaluate(ema.model, val_loader, device)
 
         current_map = 0.0
         if coco_eval is not None:
@@ -527,8 +527,9 @@ def evaluate_model(cfg):
         print(
             f"[RetinaNet] TTA metrics saved to {results_dir}/metrics_tta.json"
         )
+        wandb.log({f'tta/{k}': v for k, v in metrics_tta.items()})
 
-    confusion, class_results = compute_confusion_matrix(
+    confusion = compute_confusion_matrix(
         model, val_loader, device,
     )
     save_confusion_matrix_plot(
@@ -691,11 +692,24 @@ def run_xai(cfg):
 
     gradcam.remove_hooks()
     print("[RetinaNet] XAI complete.")
+    xai_wandb = {}
     for cat_id, counts in xai_counts.items():
+        cat_name = categories[cat_id]
         print(
-            f"  {categories[cat_id]}: "
+            f"  {cat_name}: "
             f"TP={counts['tp']} FP={counts['fp']} FN={counts['fn']}"
         )
+        xai_wandb[f'xai/{cat_name}_TP'] = counts['tp']
+        xai_wandb[f'xai/{cat_name}_FP'] = counts['fp']
+        xai_wandb[f'xai/{cat_name}_FN'] = counts['fn']
+    wandb.log(xai_wandb)
+    for cat_id in categories:
+        cat_name = categories[cat_id]
+        for ptype in ['TP', 'FP', 'FN']:
+            for n in range(max_per_type):
+                img_path = f"{results_dir}/explain/{cat_name}_{ptype}_{n}.png"
+                if os.path.exists(img_path):
+                    wandb.log({f'xai_images/{cat_name}_{ptype}_{n}': wandb.Image(img_path)})
 
 
 # =============================================================================
