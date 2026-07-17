@@ -56,7 +56,7 @@ DEFAULT_CONFIG = {
         "clip_norm": 1.0,
         "warmup_epochs": 5,
         "ema_decay": 0.99,
-        "early_stop_patience": 15,
+        "early_stop_patience": 30,
         "save_every": 10,
         "seed": 42,
         "resume": None,
