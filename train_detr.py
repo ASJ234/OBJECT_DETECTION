@@ -179,6 +179,8 @@ class AugmentedTransform:
             if torch.rand(1).item() < 0.3:
                 image = (image + torch.randn_like(image) * self.noise_std).clamp(0, 1)
 
+        image = image.clamp(0, 1)
+
         if self.normalize:
             image = TF.normalize(image, IMAGENET_MEAN, IMAGENET_STD)
 
@@ -243,10 +245,12 @@ class DetrHFWrapper(torch.nn.Module):
         for t in targets:
             h, w = images[0].shape[1], images[0].shape[2]
             box_norm = t["boxes"].clone()
-            box_norm[:, 0] /= w
-            box_norm[:, 2] /= w
-            box_norm[:, 1] /= h
-            box_norm[:, 3] /= h
+            # Convert xyxy absolute -> cxcywh normalized
+            x1, y1, x2, y2 = box_norm[:, 0], box_norm[:, 1], box_norm[:, 2], box_norm[:, 3]
+            box_norm[:, 0] = (x1 + x2) / (2.0 * w)   # cx
+            box_norm[:, 1] = (y1 + y2) / (2.0 * h)   # cy
+            box_norm[:, 2] = (x2 - x1) / w            # w
+            box_norm[:, 3] = (y2 - y1) / h            # h
             labels.append({
                 "class_labels": t["labels"] - 1,
                 "boxes": box_norm,
@@ -300,7 +304,7 @@ def build_detr(cfg):
 
     hf_model = DetrForObjectDetection.from_pretrained(
         "facebook/detr-resnet-50",
-        num_labels=num_classes,
+        num_labels=num_labels,
         id2label=id2label,
         label2id=label2id,
         ignore_mismatched_sizes=True,
@@ -556,7 +560,7 @@ def evaluate_model(cfg):
         num_workers=cfg["data"]["num_workers"],
     )
 
-    model = build_detr(cfg)
+    model, _ = build_detr(cfg)
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
     if os.path.exists(ema_path):
@@ -645,7 +649,7 @@ def run_xai(cfg):
     print("\n[DETR] Generating XAI attention maps...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = build_detr(cfg)
+    model, _ = build_detr(cfg)
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
     if os.path.exists(ema_path):

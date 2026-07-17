@@ -47,7 +47,7 @@ CLASS_NAMES = ["Background", "ActiveTuberculosis", "ObsoletePulmonaryTuberculosi
 DEFAULT_CONFIG = {
     "model": {
         "name": "RetinaNet-ResNet50-FPN-V2",
-        "num_classes": len(CLASS_NAMES),
+        "num_classes": 2,
         "use_custom_anchors": False,
         "anchor_sizes": ((16,), (32,), (64,), (128,), (256,)),
         "aspect_ratios": ((0.5, 1.0, 2.0),) * 5,
@@ -73,7 +73,7 @@ DEFAULT_CONFIG = {
         "contrast": 0.3,
         "gamma": 0.2,
         "noise_std": 0.05,
-        "normalize": False,
+        "normalize": True,
     },
     "data": {
         "train_images": "dataset/coco/train",
@@ -180,6 +180,8 @@ class AugmentedTransform:
 
             if torch.rand(1).item() < 0.3:
                 image = (image + torch.randn_like(image) * self.noise_std).clamp(0, 1)
+
+        image = image.clamp(0, 1)
 
         if self.normalize:
             image = TF.normalize(image, IMAGENET_MEAN, IMAGENET_STD)
@@ -308,16 +310,30 @@ def train(cfg):
     ema = ModelEMA(model, decay=cfg["training"]["ema_decay"])
 
     scaled_lr = scale_lr(cfg["training"]["lr"], batch_size)
-    params = [p for p in model.parameters() if p.requires_grad]
+    backbone_params = []
+    head_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if "backbone" in name or "body" in name:
+            backbone_params.append(param)
+        else:
+            head_params.append(param)
 
     if cfg["training"]["optimizer"] == "AdamW":
         optimizer = torch.optim.AdamW(
-            params, lr=scaled_lr,
+            [
+                {"params": backbone_params, "lr": scaled_lr * 0.1},
+                {"params": head_params, "lr": scaled_lr},
+            ],
             weight_decay=cfg["training"]["weight_decay"],
         )
     else:
         optimizer = torch.optim.SGD(
-            params, lr=scaled_lr,
+            [
+                {"params": backbone_params, "lr": scaled_lr * 0.1},
+                {"params": head_params, "lr": scaled_lr},
+            ],
             momentum=cfg["training"]["momentum"],
             weight_decay=cfg["training"]["weight_decay"],
         )
@@ -474,7 +490,7 @@ def evaluate_model(cfg):
         num_workers=cfg["data"]["num_workers"],
     )
 
-    model = build_retinanet(cfg)
+    model, _ = build_retinanet(cfg)
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
     if os.path.exists(ema_path):
@@ -565,7 +581,7 @@ def run_xai(cfg):
     print("\n[RetinaNet] Generating XAI explanations...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = build_retinanet(cfg)
+    model, _ = build_retinanet(cfg)
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
     if os.path.exists(ema_path):

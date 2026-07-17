@@ -1,7 +1,52 @@
 {
   "model": {
-    "name": "FCOS-ResNet50-FPN",
-    "num_classes": 3
+    "name": "RetinaNet-ResNet50-FPN-V2",
+    "num_classes": 3,
+    "use_custom_anchors": false,
+    "anchor_sizes": [
+      [
+        16
+      ],
+      [
+        32
+      ],
+      [
+        64
+      ],
+      [
+        128
+      ],
+      [
+        256
+      ]
+    ],
+    "aspect_ratios": [
+      [
+        0.5,
+        1.0,
+        2.0
+      ],
+      [
+        0.5,
+        1.0,
+        2.0
+      ],
+      [
+        0.5,
+        1.0,
+        2.0
+      ],
+      [
+        0.5,
+        1.0,
+        2.0
+      ],
+      [
+        0.5,
+        1.0,
+        2.0
+      ]
+    ]
   },
   "training": {
     "epochs": 100,
@@ -35,5 +80,5 @@
     "test_ann": "dataset/coco/test.json",
     "num_workers": 2
   },
-  "results_dir": "results/fcos"
+  "results_dir": "results/retinanet"
 }

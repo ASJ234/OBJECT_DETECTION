@@ -44,7 +44,7 @@ from explain.visualize import overlay_heatmap, draw_detections
 DEFAULT_CONFIG = {
     "model": {
         "name": "FCOS-ResNet50-FPN",
-        "num_classes": 3,
+        "num_classes": 2,
     },
     "training": {
         "epochs": 100,
@@ -67,7 +67,7 @@ DEFAULT_CONFIG = {
         "contrast": 0.3,
         "gamma": 0.2,
         "noise_std": 0.05,
-        "normalize": False,
+        "normalize": True,
     },
     "data": {
         "train_images": "dataset/coco/train",
@@ -174,6 +174,8 @@ class AugmentedTransform:
             if torch.rand(1).item() < 0.3:
                 image = (image + torch.randn_like(image) * self.noise_std).clamp(0, 1)
 
+        image = image.clamp(0, 1)
+
         if self.normalize:
             image = TF.normalize(image, IMAGENET_MEAN, IMAGENET_STD)
 
@@ -277,16 +279,30 @@ def train(cfg):
     ema = ModelEMA(model, decay=cfg["training"]["ema_decay"])
 
     scaled_lr = scale_lr(cfg["training"]["lr"], batch_size)
-    params = [p for p in model.parameters() if p.requires_grad]
+    backbone_params = []
+    head_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if "backbone" in name or "body" in name:
+            backbone_params.append(param)
+        else:
+            head_params.append(param)
 
     if cfg["training"]["optimizer"] == "AdamW":
         optimizer = torch.optim.AdamW(
-            params, lr=scaled_lr,
+            [
+                {"params": backbone_params, "lr": scaled_lr * 0.1},
+                {"params": head_params, "lr": scaled_lr},
+            ],
             weight_decay=cfg["training"]["weight_decay"],
         )
     else:
         optimizer = torch.optim.SGD(
-            params, lr=scaled_lr,
+            [
+                {"params": backbone_params, "lr": scaled_lr * 0.1},
+                {"params": head_params, "lr": scaled_lr},
+            ],
             momentum=cfg["training"]["momentum"],
             weight_decay=cfg["training"]["weight_decay"],
         )

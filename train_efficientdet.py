@@ -179,6 +179,8 @@ class AugmentedTransform:
             if torch.rand(1).item() < 0.3:
                 image = (image + torch.randn_like(image) * self.noise_std).clamp(0, 1)
 
+        image = image.clamp(0, 1)
+
         if self.normalize:
             image = TF.normalize(image, IMAGENET_MEAN, IMAGENET_STD)
 
@@ -257,6 +259,8 @@ class EfficientDetWrapper(nn.Module):
         self.score_thresh = score_thresh
 
     def forward(self, images):
+        if isinstance(images, list):
+            images = torch.stack(images)
         with torch.no_grad():
             detections = self.model(images)
         results = []
