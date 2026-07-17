@@ -188,9 +188,15 @@ class AugmentedTransform:
 def get_class_frequency_sampler(dataset):
     """Sample inversely proportional to class frequency."""
     class_counts = {1: 0, 2: 0}
-    for i in range(len(dataset)):
-        _, target = dataset[i]
-        for lbl in target["labels"].tolist():
+    image_labels = []
+    
+    for idx in range(len(dataset)):
+        img_id = dataset.ids[idx]
+        ann_ids = dataset.coco.getAnnIds(imgIds=img_id)
+        anns = dataset.coco.loadAnns(ann_ids)
+        labels = [ann['category_id'] for ann in anns]
+        image_labels.append(labels)
+        for lbl in labels:
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
@@ -198,12 +204,11 @@ def get_class_frequency_sampler(dataset):
     class_w = {k: total / (v + 1) for k, v in class_counts.items()}
 
     weights = []
-    for i in range(len(dataset)):
-        _, target = dataset[i]
-        if len(target["boxes"]) == 0:
+    for labels in image_labels:
+        if len(labels) == 0:
             weights.append(1.0)
         else:
-            w = max(class_w.get(int(l), 1.0) for l in target["labels"])
+            w = max(class_w.get(l, 1.0) for l in labels)
             weights.append(w)
 
     print(f"  Class counts: {class_counts}")

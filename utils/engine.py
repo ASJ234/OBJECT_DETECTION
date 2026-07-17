@@ -366,6 +366,16 @@ def evaluate_test(model, data_loader, device, output_file, model_name="unknown")
             scores = output['scores'].cpu().numpy()
             labels = output['labels'].cpu().numpy()
 
+            keep = scores >= 0.05
+            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+            if len(boxes) > 0:
+                keep_idx = nms(torch.tensor(boxes), torch.tensor(scores), iou_threshold=0.5)
+                boxes, scores, labels = (boxes[keep_idx], scores[keep_idx], labels[keep_idx])
+                boxes = np.atleast_2d(boxes)
+                scores = np.atleast_1d(scores)
+                labels = np.atleast_1d(labels)
+
             for box, score, label in zip(boxes, scores, labels):
                 x1, y1, x2, y2 = box
                 w, h = x2 - x1, y2 - y1
@@ -472,21 +482,16 @@ def save_confusion_matrix_plot(confusion, output_path, class_names=None):
         tp = int(confusion[cls_idx, cls_idx])
         fp = int(confusion[:, cls_idx].sum() - tp)
         fn = int(confusion[cls_idx, :].sum() - tp)
-        tn = int(confusion.sum() - tp - fp - fn)
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = (2 * precision * recall / (precision + recall)
               if (precision + recall) > 0 else 0.0)
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-        balanced_acc = (recall + specificity) / 2.0
 
         name = class_names[cls_idx] if cls_idx < len(class_names) else f'Class{cls_idx}'
-        print(f'  {name}: P={precision:.3f} R={recall:.3f} F1={f1:.3f} '
-              f'Spec={specificity:.3f} BalAcc={balanced_acc:.3f}')
+        print(f'  {name}: P={precision:.3f} R={recall:.3f} F1={f1:.3f}')
         results[name] = {
             'precision': precision, 'recall': recall, 'f1': f1,
-            'specificity': specificity, 'balanced_accuracy': balanced_acc,
         }
 
     wandb_log = {}

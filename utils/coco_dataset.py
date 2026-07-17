@@ -64,12 +64,18 @@ class CocoDetection(Dataset):
 
 
 def get_transform(train):
-    transforms_list = [T.ToTensor()]
-    if train:
-        transforms_list.append(T.RandomHorizontalFlip(0.5))
-    transform = T.Compose(transforms_list)
     def _apply(image, target):
-        return transform(image), target
+        import torchvision.transforms.functional as TF
+        import torch
+        image = TF.to_tensor(image)
+        if train and torch.rand(1).item() < 0.5:
+            image = TF.hflip(image)
+            if len(target["boxes"]) > 0:
+                boxes = target["boxes"].clone()
+                w = image.shape[-1]
+                boxes[:, [0, 2]] = w - boxes[:, [2, 0]]
+                target["boxes"] = boxes
+        return image, target
     return _apply
 
 

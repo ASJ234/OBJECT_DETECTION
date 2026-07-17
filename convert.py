@@ -115,7 +115,7 @@ def main():
 
     make_dir(OUTPUT_DIR)
 
-    convert_to_coco(['train', 'val'])
+    convert_to_coco(['train', 'val', 'test'])
 
     print('\nConversion complete.')
     print(f'  COCO: {os.path.join(OUTPUT_DIR, "coco")}/')

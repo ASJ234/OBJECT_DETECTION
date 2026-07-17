@@ -89,7 +89,7 @@ DEFAULT_CONFIG = {
         "val_ann": "dataset/coco/val.json",
         "test_images": "dataset/coco/test",
         "test_ann": "dataset/coco/test.json",
-        "num_workers": 0,
+        "num_workers": 2,
     },
     "results_dir": "results/efficientdet",
 }
@@ -259,8 +259,8 @@ class EfficientDetWrapper(nn.Module):
         self.score_thresh = score_thresh
 
     def forward(self, images):
-        if isinstance(images, list):
-            images = torch.stack(images)
+        if isinstance(images, (list, tuple)):
+            images = torch.stack(list(images))
         with torch.no_grad():
             detections = self.model(images)
         results = []
@@ -576,11 +576,11 @@ def evaluate_model(cfg):
     )
     val_loader = DataLoader(
         val_dataset, batch_size=cfg["training"]["batch_size"],
-        shuffle=False, collate_fn=collate_val,
+        shuffle=False, collate_fn=collate_fn,
         num_workers=cfg["data"]["num_workers"],
     )
 
-    raw_model = build_efficientdet(cfg)
+    raw_model, _ = build_efficientdet(cfg)
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
     if os.path.exists(ema_path):
@@ -655,7 +655,7 @@ def evaluate_model(cfg):
         )
         test_loader = DataLoader(
             test_dataset, batch_size=cfg["training"]["batch_size"],
-            shuffle=False, collate_fn=collate_val,
+            shuffle=False, collate_fn=collate_fn,
             num_workers=cfg["data"]["num_workers"],
         )
         evaluate_test(
@@ -675,7 +675,7 @@ def run_xai(cfg):
     print("\n[EfficientDet] Generating XAI explanations...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    raw_model = build_efficientdet(cfg)
+    raw_model, _ = build_efficientdet(cfg)
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
     if os.path.exists(ema_path):

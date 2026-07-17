@@ -194,9 +194,15 @@ class AugmentedTransform:
 # =============================================================================
 def get_class_frequency_sampler(dataset):
     class_counts = {1: 0, 2: 0}
-    for i in range(len(dataset)):
-        _, target = dataset[i]
-        for lbl in target["labels"].tolist():
+    image_labels = []
+    
+    for idx in range(len(dataset)):
+        img_id = dataset.ids[idx]
+        ann_ids = dataset.coco.getAnnIds(imgIds=img_id)
+        anns = dataset.coco.loadAnns(ann_ids)
+        labels = [ann['category_id'] for ann in anns]
+        image_labels.append(labels)
+        for lbl in labels:
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
@@ -204,12 +210,11 @@ def get_class_frequency_sampler(dataset):
     class_w = {k: total / (v + 1) for k, v in class_counts.items()}
 
     weights = []
-    for i in range(len(dataset)):
-        _, target = dataset[i]
-        if len(target["boxes"]) == 0:
+    for labels in image_labels:
+        if len(labels) == 0:
             weights.append(1.0)
         else:
-            w = max(class_w.get(int(l), 1.0) for l in target["labels"])
+            w = max(class_w.get(l, 1.0) for l in labels)
             weights.append(w)
 
     print(f"  Class counts: {class_counts}")
@@ -233,32 +238,52 @@ def build_retinanet(cfg):
     use_pretrained = False
 
     try:
-        model = retinanet_resnet50_fpn_v2(
-            weights="DEFAULT", num_classes=num_classes,
+        model = retinanet_resnet50_fpn_v2(weights="DEFAULT")
+        from torchvision.models.detection.retinanet import RetinaNetClassificationHead, RetinaNetRegressionHead
+        in_features = model.head.classification_head.conv[0][0].in_channels
+        
+        if use_custom:
+            anchor_sizes = cfg["model"]["anchor_sizes"]
+            aspect_ratios = cfg["model"]["aspect_ratios"]
+            model.anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+            print(f"  Custom anchors: sizes={anchor_sizes}, ratios={aspect_ratios[0]}")
+            n_anchors = len(anchor_sizes[0]) * len(aspect_ratios[0])
+            print(f"  Total anchors per location: {n_anchors}")
+        else:
+            n_anchors = model.head.classification_head.num_anchors
+            
+        model.head.classification_head = RetinaNetClassificationHead(
+            in_features, n_anchors, num_classes
         )
+        if use_custom:
+            model.head.regression_head = RetinaNetRegressionHead(
+                in_features, n_anchors
+            )
+            
         use_pretrained = True
-        print("  Loaded COCO-pretrained RetinaNet-V2 (backbone + neck)")
-    except Exception:
+        print("  Loaded COCO-pretrained RetinaNet-V2 (backbone + neck) and replaced head")
+    except Exception as e:
+        print(f"  Failed to load full weights: {e}")
         try:
             model = retinanet_resnet50_fpn_v2(
                 weights_backbone="DEFAULT", num_classes=num_classes,
             )
+            if use_custom:
+                anchor_sizes = cfg["model"]["anchor_sizes"]
+                aspect_ratios = cfg["model"]["aspect_ratios"]
+                model.anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
             use_pretrained = True
             print("  Loaded backbone-only pretrained weights")
         except Exception:
             import warnings
-            warnings.warn("Could not load pretrained weights, using random init. Disabling AMP.")
+            warnings.warn("Could not load pretrained weights, using random init.")
             model = retinanet_resnet50_fpn_v2(
                 weights_backbone=None, num_classes=num_classes,
             )
-
-    if use_custom:
-        anchor_sizes = cfg["model"]["anchor_sizes"]
-        aspect_ratios = cfg["model"]["aspect_ratios"]
-        model.anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
-        print(f"  Custom anchors: sizes={anchor_sizes}, ratios={aspect_ratios[0]}")
-        n_anchors = sum(len(s) * len(aspect_ratios[0]) for s in anchor_sizes)
-        print(f"  Total anchors per location: {n_anchors}")
+            if use_custom:
+                anchor_sizes = cfg["model"]["anchor_sizes"]
+                aspect_ratios = cfg["model"]["aspect_ratios"]
+                model.anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
 
     return model, use_pretrained
 
