@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     "training": {
         "epochs": 100,
         "batch_size": 16,
-        "lr": 0.001,
+        "lr": 0.0001,
         "optimizer": "AdamW",
         "weight_decay": 1e-4,
         "momentum": 0.9,
@@ -250,11 +250,10 @@ def train(cfg):
         transforms=AugmentedTransform(train=False, cfg=cfg),
     )
 
-    sampler = get_class_frequency_sampler(train_dataset)
     batch_size = cfg["training"]["batch_size"]
 
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, sampler=sampler,
+        train_dataset, batch_size=batch_size, shuffle=True,
         collate_fn=collate_fn, num_workers=cfg["data"]["num_workers"],
         drop_last=True, pin_memory=True,
     )
