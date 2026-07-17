@@ -47,7 +47,7 @@ CLASS_NAMES = ["Background", "ActiveTuberculosis", "ObsoletePulmonaryTuberculosi
 DEFAULT_CONFIG = {
     "model": {
         "name": "RetinaNet-ResNet50-FPN-V2",
-        "num_classes": 2,
+        "num_classes": 3,
         "use_custom_anchors": False,
         "anchor_sizes": ((16,), (32,), (64,), (128,), (256,)),
         "aspect_ratios": ((0.5, 1.0, 2.0),) * 5,

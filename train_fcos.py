@@ -44,7 +44,7 @@ from explain.visualize import overlay_heatmap, draw_detections
 DEFAULT_CONFIG = {
     "model": {
         "name": "FCOS-ResNet50-FPN",
-        "num_classes": 2,
+        "num_classes": 3,
     },
     "training": {
         "epochs": 100,
