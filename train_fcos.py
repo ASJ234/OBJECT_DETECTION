@@ -269,6 +269,7 @@ def train(cfg):
         model = fcos_resnet50_fpn(
             weights_backbone="DEFAULT",
             num_classes=cfg["model"]["num_classes"],
+            score_thresh=0.05,
         )
         use_pretrained = True
         print("  Loaded pretrained ResNet50 backbone")
@@ -278,6 +279,7 @@ def train(cfg):
         model = fcos_resnet50_fpn(
             weights_backbone=None,
             num_classes=cfg["model"]["num_classes"],
+            score_thresh=0.05,
         )
     model.to(device)
 

@@ -238,7 +238,7 @@ def build_retinanet(cfg):
     use_pretrained = False
 
     try:
-        model = retinanet_resnet50_fpn_v2(weights="DEFAULT")
+        model = retinanet_resnet50_fpn_v2(weights="DEFAULT", score_thresh=0.05)
         from torchvision.models.detection.retinanet import RetinaNetClassificationHead, RetinaNetRegressionHead
         in_features = model.head.classification_head.conv[0][0].in_channels
         
@@ -266,7 +266,7 @@ def build_retinanet(cfg):
         print(f"  Failed to load full weights: {e}")
         try:
             model = retinanet_resnet50_fpn_v2(
-                weights_backbone="DEFAULT", num_classes=num_classes,
+                weights_backbone="DEFAULT", num_classes=num_classes, score_thresh=0.05,
             )
             if use_custom:
                 anchor_sizes = cfg["model"]["anchor_sizes"]
@@ -278,7 +278,7 @@ def build_retinanet(cfg):
             import warnings
             warnings.warn("Could not load pretrained weights, using random init.")
             model = retinanet_resnet50_fpn_v2(
-                weights_backbone=None, num_classes=num_classes,
+                weights_backbone=None, num_classes=num_classes, score_thresh=0.05,
             )
             if use_custom:
                 anchor_sizes = cfg["model"]["anchor_sizes"]
