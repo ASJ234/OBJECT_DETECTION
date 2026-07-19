@@ -49,12 +49,12 @@ DEFAULT_CONFIG = {
     "training": {
         "epochs": 100,
         "batch_size": 16,
-        "lr": 0.0001,
-        "optimizer": "AdamW",
+        "lr": 0.01,
+        "optimizer": "SGD",
         "weight_decay": 1e-4,
         "momentum": 0.9,
         "clip_norm": 1.0,
-        "warmup_epochs": 5,
+        "warmup_epochs": 3,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
@@ -224,6 +224,25 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 
 
 # =============================================================================
+# Model Initialization
+# =============================================================================
+def get_fcos_model(num_classes, score_thresh=0.05):
+    import math
+    model = fcos_resnet50_fpn(weights="DEFAULT", score_thresh=score_thresh)
+    in_channels = model.head.classification_head.cls_logits.in_channels
+    num_anchors = model.head.classification_head.num_anchors
+    
+    model.head.classification_head.num_classes = num_classes
+    model.head.classification_head.cls_logits = nn.Conv2d(
+        in_channels, num_anchors * num_classes, kernel_size=3, stride=1, padding=1
+    )
+    
+    torch.nn.init.constant_(model.head.classification_head.cls_logits.bias, -math.log((1 - 0.01) / 0.01))
+    torch.nn.init.normal_(model.head.classification_head.cls_logits.weight, std=0.01)
+    return model
+
+
+# =============================================================================
 # Training
 # =============================================================================
 def train(cfg):
@@ -252,8 +271,11 @@ def train(cfg):
 
     batch_size = cfg["training"]["batch_size"]
 
+    print("[FCOS] Building weighted sampler for class-imbalanced dataset...")
+    sampler = get_class_frequency_sampler(train_dataset)
+
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
+        train_dataset, batch_size=batch_size, sampler=sampler,
         collate_fn=collate_fn, num_workers=cfg["data"]["num_workers"],
         drop_last=True, pin_memory=True,
     )
@@ -263,18 +285,16 @@ def train(cfg):
         pin_memory=True,
     )
 
-    use_pretrained = False
     try:
-        model = fcos_resnet50_fpn(
-            weights_backbone="DEFAULT",
+        model = get_fcos_model(
             num_classes=cfg["model"]["num_classes"],
             score_thresh=0.05,
         )
         use_pretrained = True
-        print("  Loaded pretrained ResNet50 backbone")
-    except Exception:
+        print("  Loaded pretrained COCO weights and replaced head")
+    except Exception as e:
         import warnings
-        warnings.warn("Could not load pretrained backbone, using random init")
+        warnings.warn(f"Could not load pretrained weights: {e}")
         model = fcos_resnet50_fpn(
             weights_backbone=None,
             num_classes=cfg["model"]["num_classes"],
@@ -459,9 +479,9 @@ def evaluate_model(cfg):
         num_workers=cfg["data"]["num_workers"],
     )
 
-    model = fcos_resnet50_fpn(
-        weights_backbone="DEFAULT",
+    model = get_fcos_model(
         num_classes=cfg["model"]["num_classes"],
+        score_thresh=0.05,
     )
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
@@ -567,9 +587,9 @@ def run_xai(cfg):
     print("\n[FCOS] Generating XAI explanations...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = fcos_resnet50_fpn(
-        weights_backbone="DEFAULT",
+    model = get_fcos_model(
         num_classes=cfg["model"]["num_classes"],
+        score_thresh=0.05,
     )
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"

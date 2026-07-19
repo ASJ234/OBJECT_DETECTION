@@ -55,12 +55,12 @@ DEFAULT_CONFIG = {
     "training": {
         "epochs": 100,
         "batch_size": 16,
-        "lr": 0.0001,
-        "optimizer": "AdamW",
+        "lr": 0.01,
+        "optimizer": "SGD",
         "weight_decay": 1e-4,
         "momentum": 0.9,
         "clip_norm": 1.0,
-        "warmup_epochs": 5,
+        "warmup_epochs": 3,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
@@ -317,8 +317,11 @@ def train(cfg):
 
     batch_size = cfg["training"]["batch_size"]
 
+    print("[RetinaNet] Building weighted sampler for class-imbalanced dataset...")
+    sampler = get_class_frequency_sampler(train_dataset)
+
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
+        train_dataset, batch_size=batch_size, sampler=sampler,
         collate_fn=collate_fn, num_workers=cfg["data"]["num_workers"],
         drop_last=True, pin_memory=True,
     )

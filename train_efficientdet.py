@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import wandb
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 import torchvision.transforms.functional as TF
 import torch.nn.functional as F_interp
 
@@ -63,11 +63,11 @@ DEFAULT_CONFIG = {
     "training": {
         "epochs": 100,
         "batch_size": 16,
-        "lr": 1e-4,
-        "lr_backbone": 1e-5,
+        "lr": 5e-3,
+        "lr_backbone": 5e-4,
         "weight_decay": 1e-4,
         "clip_norm": 1.0,
-        "warmup_epochs": 5,
+        "warmup_epochs": 3,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
@@ -302,6 +302,39 @@ def build_efficientdet(cfg):
 
 
 # =============================================================================
+# Class-Frequency Weighted Sampler
+# =============================================================================
+def get_class_frequency_sampler(dataset):
+    class_counts = {1: 0, 2: 0}
+    image_labels = []
+
+    for idx in range(len(dataset)):
+        img_id = dataset.ids[idx]
+        ann_ids = dataset.coco.getAnnIds(imgIds=img_id)
+        anns = dataset.coco.loadAnns(ann_ids)
+        labels = [ann['category_id'] for ann in anns]
+        image_labels.append(labels)
+        for lbl in labels:
+            if lbl in class_counts:
+                class_counts[lbl] += 1
+
+    total = sum(class_counts.values()) or 1
+    class_w = {k: total / (v + 1) for k, v in class_counts.items()}
+
+    weights = []
+    for labels in image_labels:
+        if len(labels) == 0:
+            weights.append(1.0)
+        else:
+            w = max(class_w.get(l, 1.0) for l in labels)
+            weights.append(w)
+
+    print(f"  Class counts: {class_counts}")
+    print(f"  Class weights: { {k: f'{v:.2f}' for k, v in class_w.items()} }")
+    return WeightedRandomSampler(weights, len(weights), replacement=True)
+
+
+# =============================================================================
 # Training
 # =============================================================================
 def train(cfg):
@@ -334,8 +367,11 @@ def train(cfg):
 
     batch_size = cfg["training"]["batch_size"]
 
+    print("[EfficientDet] Building weighted sampler for class-imbalanced dataset...")
+    sampler = get_class_frequency_sampler(train_dataset)
+
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
+        train_dataset, batch_size=batch_size, sampler=sampler,
         collate_fn=collate_train, num_workers=cfg["data"]["num_workers"],
         drop_last=True, pin_memory=True,
     )
