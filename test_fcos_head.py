@@ -6,7 +6,7 @@ from torchvision.models.detection import fcos_resnet50_fpn
 model = fcos_resnet50_fpn(weights="DEFAULT")
 in_channels = model.head.classification_head.cls_logits.in_channels
 num_anchors = model.head.classification_head.num_anchors
-num_classes = 3
+num_classes = 2
 
 model.head.classification_head.num_classes = num_classes
 model.head.classification_head.cls_logits = nn.Conv2d(

@@ -19,7 +19,7 @@ TRAIN_ANN = os.path.join(DATA_DIR, "train.json")
 VAL_ANN = os.path.join(DATA_DIR, "val.json")
 TRAIN_IMGS = os.path.join(DATA_DIR, "train")
 VAL_IMGS = os.path.join(DATA_DIR, "val")
-NUM_CLASSES = 3
+NUM_CLASSES = 2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 

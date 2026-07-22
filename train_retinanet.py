@@ -45,7 +45,7 @@ CLASS_NAMES = ["Background", "ActiveTuberculosis", "ObsoletePulmonaryTuberculosi
 DEFAULT_CONFIG = {
     "model": {
         "name": "RetinaNet-ResNet50-FPN-V2",
-        "num_classes": 3,
+        "num_classes": 2,
         "use_custom_anchors": False,
         "anchor_sizes": ((16,), (32,), (64,), (128,), (256,)),
         "aspect_ratios": ((0.5, 1.0, 2.0),) * 5,
@@ -262,7 +262,7 @@ def _patch_retinanet_loss(head_cls, class_alphas):
             foreground = m >= 0
             n_fg = foreground.sum()
             gt_target = torch.zeros_like(logits)
-            gt_target[foreground, t["labels"][m[foreground]]] = 1.0
+            gt_target[foreground, t["labels"][m[foreground]] - 1] = 1.0
             valid = m != self.BETWEEN_THRESHOLDS
             losses.append(
                 _per_class_focal_loss(
@@ -391,16 +391,17 @@ def train(cfg):
         label = ch + 1
         if label in class_counts:
             pi = 0.01 * (min_count / max(class_counts[label], 1))
-            alpha = 0.75 - 0.50 * (class_counts[label] / max_count)
+            ratio = class_counts[label] / max_count
+            alpha = 0.90 - 0.65 * (ratio * ratio)
         else:
             pi = 0.001
             alpha = 0.25
         pi = max(0.001, min(0.05, pi))
-        alpha = max(0.25, min(0.75, alpha))
+        alpha = max(0.25, min(0.90, alpha))
         class_priors.append(pi)
         class_alphas.append(alpha)
-    print(f"  Class priors: ch0={class_priors[0]:.4f}, ch1={class_priors[1]:.4f}, ch2={class_priors[2]:.4f}")
-    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB), ch2={class_alphas[2]:.3f} (unused) based on counts {class_counts}")
+    print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB)")
+    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB) based on counts {class_counts}")
 
     class_alphas_tensor = torch.tensor(class_alphas)
     model, use_pretrained = build_retinanet(cfg, class_priors=class_priors, class_alphas=class_alphas_tensor)

@@ -43,7 +43,7 @@ from explain.visualize import overlay_heatmap, draw_detections
 DEFAULT_CONFIG = {
     "model": {
         "name": "FCOS-ResNet50-FPN",
-        "num_classes": 3,
+        "num_classes": 2,
     },
     "training": {
         "epochs": 100,
@@ -255,7 +255,7 @@ def _patch_fcos_loss(head, class_alphas):
                 gt_classes_targets = t["labels"].new_zeros((len(m),))
                 gt_boxes_targets = t["boxes"].new_zeros((len(m), 4))
             else:
-                gt_classes_targets = t["labels"][m.clip(min=0)]
+                gt_classes_targets = t["labels"][m.clip(min=0)] - 1
                 gt_boxes_targets = t["boxes"][m.clip(min=0)]
             gt_classes_targets[m < 0] = -1
             all_gt_classes_targets.append(gt_classes_targets)
@@ -382,16 +382,17 @@ def train(cfg):
         label = ch + 1
         if label in class_counts:
             pi = 0.01 * (min_count / max(class_counts[label], 1))
-            alpha = 0.75 - 0.50 * (class_counts[label] / max_count)
+            ratio = class_counts[label] / max_count
+            alpha = 0.90 - 0.65 * (ratio * ratio)
         else:
             pi = 0.001
             alpha = 0.25
         pi = max(0.001, min(0.05, pi))
-        alpha = max(0.25, min(0.75, alpha))
+        alpha = max(0.25, min(0.90, alpha))
         class_priors.append(pi)
         class_alphas.append(alpha)
-    print(f"  Class priors: ch0={class_priors[0]:.4f}, ch1={class_priors[1]:.4f}, ch2={class_priors[2]:.4f}")
-    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB), ch2={class_alphas[2]:.3f} (unused) based on counts {class_counts}")
+    print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB)")
+    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB) based on counts {class_counts}")
 
     class_alphas_tensor = torch.tensor(class_alphas)
 

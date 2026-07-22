@@ -311,7 +311,7 @@ def evaluate(model, data_loader, device, output_file=None, tta=False):
                     'image_id': img_id,
                     'bbox': [float(x1), float(y1), float(w), float(h)],
                     'score': float(score),
-                    'category_id': int(label),
+                    'category_id': int(label) + 1,
                 })
 
     if not results:
@@ -383,7 +383,7 @@ def evaluate_test(model, data_loader, device, output_file, model_name="unknown")
                     'image_id': img_id,
                     'bbox': [float(x1), float(y1), float(w), float(h)],
                     'score': float(score),
-                    'category_id': int(label),
+                    'category_id': int(label) + 1,
                 })
 
     output = {
@@ -436,7 +436,7 @@ def compute_confusion_matrix(model, data_loader, device,
                     for gi, pi in zip(gt_idx, pred_idx):
                         if iou_matrix[gi, pi] >= iou_thresh:
                             gt_cls = gt_labels[gi].item()
-                            pred_cls = pred_labels[pi].item()
+                            pred_cls = pred_labels[pi].item() + 1
                             confusion[gt_cls, pred_cls] += 1
                             matched_gt.add(gi)
                             matched_pred.add(pi)
@@ -447,7 +447,7 @@ def compute_confusion_matrix(model, data_loader, device,
 
             for pi in range(len(pred_boxes)):
                 if pi not in matched_pred:
-                    confusion[0, pred_labels[pi].item()] += 1
+                    confusion[0, pred_labels[pi].item() + 1] += 1
 
     return confusion
 
