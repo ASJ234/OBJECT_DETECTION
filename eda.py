@@ -1,7 +1,7 @@
 import os
 import json
 import glob
-from collections import Counter, defaultdict
+from collections import Counter
 from statistics import mean, median
 
 import numpy as np

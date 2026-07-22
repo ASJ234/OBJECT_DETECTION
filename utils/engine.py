@@ -7,18 +7,14 @@ import csv
 import time
 import gc
 import random
-import copy
 import logging
 from collections import defaultdict
-from pathlib import Path
 
 import torch
 import torch.nn as nn
-import torchvision
 import numpy as np
 from torchvision.ops import box_iou, nms
 from scipy.optimize import linear_sum_assignment
-from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 import matplotlib
 matplotlib.use('Agg')
