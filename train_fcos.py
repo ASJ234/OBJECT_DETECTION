@@ -20,7 +20,6 @@ import numpy as np
 import wandb
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision.models.detection import fcos_resnet50_fpn
-import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
 try:

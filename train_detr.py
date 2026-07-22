@@ -15,12 +15,10 @@ import copy
 import argparse
 
 import torch
-import torch.nn as nn
 import numpy as np
 import wandb
 from torch.utils.data import DataLoader, WeightedRandomSampler
-from transformers import DetrForObjectDetection, DetrImageProcessor
-import torchvision.transforms as T
+from transformers import DetrForObjectDetection
 import torchvision.transforms.functional as TF
 
 try:
@@ -36,8 +34,6 @@ from utils.engine import (
 )
 from utils.ema import ModelEMA
 from explain.detr_attention import DETRAttentionExtractor
-from explain.visualize import overlay_heatmap, draw_detections
-
 CLASS_NAMES = {0: "Background", 1: "ActiveTuberculosis", 2: "ObsoletePulmonaryTuberculosis"}
 CLASS_COLORS = {1: (255, 0, 0), 2: (0, 200, 255)}
 NUM_CLASSES = 3

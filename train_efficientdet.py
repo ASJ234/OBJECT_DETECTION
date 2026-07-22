@@ -40,7 +40,7 @@ from utils.engine import (
     plot_training_curves,
 )
 from utils.ema import ModelEMA
-from explain.gradcam import GradCAM, get_target_layer
+from explain.gradcam import GradCAM
 from explain.visualize import overlay_heatmap, draw_detections
 
 CLASS_NAMES = {

@@ -15,13 +15,11 @@ import copy
 import argparse
 
 import torch
-import torch.nn as nn
 import numpy as np
 import wandb
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision.models.detection import retinanet_resnet50_fpn_v2
 from torchvision.models.detection.anchor_utils import AnchorGenerator
-import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
 try:
