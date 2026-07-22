@@ -230,6 +230,21 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 # =============================================================================
 # Build RetinaNet with optional custom anchors for small lesions
 # =============================================================================
+def _per_class_focal_loss(inputs, targets, alphas, gamma=2.0, reduction="sum"):
+    p = torch.sigmoid(inputs)
+    ce_loss = torch.nn.functional.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    p_t = p * targets + (1 - p) * (1 - targets)
+    loss = ce_loss * ((1 - p_t) ** gamma)
+    if alphas is not None:
+        alphas = alphas.to(loss.device, loss.dtype)
+        alpha_t = targets * alphas + (1 - targets) * (1 - alphas)
+        loss = alpha_t * loss
+    if reduction == "sum":
+        return loss.sum()
+    elif reduction == "mean":
+        return loss.mean()
+    return loss
+
 def _apply_class_priors(model, num_classes, class_priors):
     import math
     bias = model.head.classification_head.cls_logits.bias
@@ -237,7 +252,27 @@ def _apply_class_priors(model, num_classes, class_priors):
         mask = torch.arange(bias.size(0), device=bias.device) % num_classes == c
         bias.data[mask] = -math.log((1 - pi) / pi)
 
-def build_retinanet(cfg, class_priors=None):
+def _patch_retinanet_loss(head_cls, class_alphas):
+    from torchvision.ops import sigmoid_focal_loss as _orig_sfl
+    original_fn = head_cls.compute_loss
+    def patched(self, targets, head_outputs, matched_idxs):
+        losses = []
+        cls_logits = head_outputs["cls_logits"]
+        for t, logits, m in zip(targets, cls_logits, matched_idxs):
+            foreground = m >= 0
+            n_fg = foreground.sum()
+            gt_target = torch.zeros_like(logits)
+            gt_target[foreground, t["labels"][m[foreground]]] = 1.0
+            valid = m != self.BETWEEN_THRESHOLDS
+            losses.append(
+                _per_class_focal_loss(
+                    logits[valid], gt_target[valid], alphas=class_alphas.to(logits.device), reduction="sum",
+                ) / max(1, n_fg)
+            )
+        return torch.stack(losses).sum() / max(1, len(targets))
+    head_cls.compute_loss = patched.__get__(head_cls, type(head_cls))
+
+def build_retinanet(cfg, class_priors=None, class_alphas=None):
     num_classes = cfg["model"]["num_classes"]
     use_custom = cfg["model"].get("use_custom_anchors", True)
     use_pretrained = False
@@ -292,6 +327,8 @@ def build_retinanet(cfg, class_priors=None):
 
     if class_priors:
         _apply_class_priors(model, num_classes, class_priors)
+    if class_alphas is not None:
+        _patch_retinanet_loss(model.head.classification_head, class_alphas)
     return model, use_pretrained
 
 
@@ -345,19 +382,28 @@ def train(cfg):
             cid = ann['category_id']
             class_counts[cid] = class_counts.get(cid, 0) + 1
     min_count = min(class_counts.values())
+    max_count = max(class_counts.values())
     n_classes = cfg["model"]["num_classes"]
+    
     class_priors = []
+    class_alphas = []
     for ch in range(n_classes):
         label = ch + 1
         if label in class_counts:
             pi = 0.01 * (min_count / max(class_counts[label], 1))
+            alpha = 0.75 - 0.50 * (class_counts[label] / max_count)
         else:
             pi = 0.001
+            alpha = 0.25
         pi = max(0.001, min(0.05, pi))
+        alpha = max(0.25, min(0.75, alpha))
         class_priors.append(pi)
-    print(f"  Class priors for bias init: ch0={class_priors[0]:.4f} (unused), ch1={class_priors[1]:.4f} (ActiveTB), ch2={class_priors[2]:.4f} (ObsoleteTB) based on counts {class_counts}")
+        class_alphas.append(alpha)
+    print(f"  Class priors: ch0={class_priors[0]:.4f}, ch1={class_priors[1]:.4f}, ch2={class_priors[2]:.4f}")
+    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB), ch2={class_alphas[2]:.3f} (unused) based on counts {class_counts}")
 
-    model, use_pretrained = build_retinanet(cfg, class_priors=class_priors)
+    class_alphas_tensor = torch.tensor(class_alphas)
+    model, use_pretrained = build_retinanet(cfg, class_priors=class_priors, class_alphas=class_alphas_tensor)
     model.to(device)
 
     ema = ModelEMA(model, decay=cfg["training"]["ema_decay"])

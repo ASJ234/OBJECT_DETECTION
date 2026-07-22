@@ -225,7 +225,78 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 # =============================================================================
 # Model Initialization
 # =============================================================================
-def get_fcos_model(num_classes, score_thresh=0.05, class_priors=None):
+def _per_class_focal_loss(inputs, targets, alphas, gamma=2.0, reduction="sum"):
+    p = torch.sigmoid(inputs)
+    ce_loss = torch.nn.functional.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    p_t = p * targets + (1 - p) * (1 - targets)
+    loss = ce_loss * ((1 - p_t) ** gamma)
+    if alphas is not None:
+        alphas = alphas.to(loss.device, loss.dtype)
+        alpha_t = targets * alphas + (1 - targets) * (1 - alphas)
+        loss = alpha_t * loss
+    if reduction == "sum":
+        return loss.sum()
+    elif reduction == "mean":
+        return loss.mean()
+    return loss
+
+def _patch_fcos_loss(head, class_alphas):
+    import torchvision.ops as ops
+    original_fn = head.compute_loss
+    def patched(self, targets, head_outputs, anchors, matched_idxs):
+        cls_logits = head_outputs["cls_logits"]
+        bbox_regression = head_outputs["bbox_regression"]
+        bbox_ctrness = head_outputs["bbox_ctrness"]
+
+        all_gt_classes_targets = []
+        all_gt_boxes_targets = []
+        for t, m in zip(targets, matched_idxs):
+            if len(t["labels"]) == 0:
+                gt_classes_targets = t["labels"].new_zeros((len(m),))
+                gt_boxes_targets = t["boxes"].new_zeros((len(m), 4))
+            else:
+                gt_classes_targets = t["labels"][m.clip(min=0)]
+                gt_boxes_targets = t["boxes"][m.clip(min=0)]
+            gt_classes_targets[m < 0] = -1
+            all_gt_classes_targets.append(gt_classes_targets)
+            all_gt_boxes_targets.append(gt_boxes_targets)
+
+        all_gt_boxes_targets = torch.stack(all_gt_boxes_targets)
+        all_gt_classes_targets = torch.stack(all_gt_classes_targets)
+        anchors = torch.stack(anchors)
+
+        foregroud_mask = all_gt_classes_targets >= 0
+        num_foreground = foregroud_mask.sum().item()
+
+        gt_classes_targets = torch.zeros_like(cls_logits)
+        gt_classes_targets[foregroud_mask, all_gt_classes_targets[foregroud_mask]] = 1.0
+        loss_cls = _per_class_focal_loss(cls_logits, gt_classes_targets, alphas=class_alphas.to(cls_logits.device), reduction="sum")
+
+        pred_boxes = self.box_coder.decode(bbox_regression, anchors)
+        loss_bbox_reg = ops.generalized_box_iou_loss(
+            pred_boxes[foregroud_mask], all_gt_boxes_targets[foregroud_mask], reduction="sum")
+
+        bbox_reg_targets = self.box_coder.encode(anchors, all_gt_boxes_targets)
+        if len(bbox_reg_targets) == 0:
+            gt_ctrness_targets = bbox_reg_targets.new_zeros(bbox_reg_targets.size()[:-1])
+        else:
+            lr = bbox_reg_targets[:, :, [0, 2]]
+            tb = bbox_reg_targets[:, :, [1, 3]]
+            gt_ctrness_targets = torch.sqrt((lr.min(dim=-1)[0] / lr.max(dim=-1)[0]) * (tb.min(dim=-1)[0] / tb.max(dim=-1)[0]))
+
+        pred_ctrness = bbox_ctrness.squeeze(dim=2)
+        loss_bbox_ctrness = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_ctrness[foregroud_mask], gt_ctrness_targets[foregroud_mask], reduction="sum")
+
+        n = max(1, num_foreground)
+        return {
+            "classification": loss_cls / n,
+            "bbox_regression": loss_bbox_reg / n,
+            "bbox_ctrness": loss_bbox_ctrness / n,
+        }
+    head.compute_loss = patched.__get__(head, type(head))
+
+def get_fcos_model(num_classes, score_thresh=0.05, class_priors=None, class_alphas=None):
     import math
     model = fcos_resnet50_fpn(weights="DEFAULT", score_thresh=score_thresh)
     in_channels = model.head.classification_head.cls_logits.in_channels
@@ -244,6 +315,9 @@ def get_fcos_model(num_classes, score_thresh=0.05, class_priors=None):
     else:
         torch.nn.init.constant_(bias, -math.log((1 - 0.01) / 0.01))
     torch.nn.init.normal_(model.head.classification_head.cls_logits.weight, std=0.01)
+
+    if class_alphas is not None:
+        _patch_fcos_loss(model.head, class_alphas)
     return model
 
 
@@ -298,23 +372,35 @@ def train(cfg):
             class_counts[cid] = class_counts.get(cid, 0) + 1
     total = max(sum(class_counts.values()), 1)
     min_count = min(class_counts.values())
+    max_count = max(class_counts.values())
     n_classes = cfg["model"]["num_classes"]
+    
     class_priors = []
+    class_alphas = []
+    label_names = {1: "ActiveTB", 2: "ObsoleteTB"}
     for ch in range(n_classes):
         label = ch + 1
         if label in class_counts:
             pi = 0.01 * (min_count / max(class_counts[label], 1))
+            alpha = 0.75 - 0.50 * (class_counts[label] / max_count)
         else:
             pi = 0.001
+            alpha = 0.25
         pi = max(0.001, min(0.05, pi))
+        alpha = max(0.25, min(0.75, alpha))
         class_priors.append(pi)
-    print(f"  Class priors for bias init: ch0={class_priors[0]:.4f} (unused), ch1={class_priors[1]:.4f} (ActiveTB), ch2={class_priors[2]:.4f} (ObsoleteTB) based on counts {class_counts}")
+        class_alphas.append(alpha)
+    print(f"  Class priors: ch0={class_priors[0]:.4f}, ch1={class_priors[1]:.4f}, ch2={class_priors[2]:.4f}")
+    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB), ch2={class_alphas[2]:.3f} (unused) based on counts {class_counts}")
+
+    class_alphas_tensor = torch.tensor(class_alphas)
 
     try:
         model = get_fcos_model(
             num_classes=cfg["model"]["num_classes"],
             score_thresh=0.05,
             class_priors=class_priors,
+            class_alphas=class_alphas_tensor,
         )
         use_pretrained = True
         print("  Loaded pretrained COCO weights and replaced head")

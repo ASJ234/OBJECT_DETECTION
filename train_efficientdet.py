@@ -400,17 +400,25 @@ def train(cfg):
             cid = ann['category_id']
             class_counts[cid] = class_counts.get(cid, 0) + 1
     min_count = min(class_counts.values())
+    max_count = max(class_counts.values())
     n_classes = cfg["model"]["num_classes"]
+
     class_priors = []
+    class_alphas = []
     for ch in range(n_classes):
         label = ch + 1
         if label in class_counts:
             pi = 0.01 * (min_count / max(class_counts[label], 1))
+            alpha = 0.75 - 0.50 * (class_counts[label] / max_count)
         else:
             pi = 0.001
+            alpha = 0.25
         pi = max(0.001, min(0.05, pi))
+        alpha = max(0.25, min(0.75, alpha))
         class_priors.append(pi)
-    print(f"  Class priors for bias init: ch0={class_priors[0]:.4f} (unused), ch1={class_priors[1]:.4f} (ActiveTB), ch2={class_priors[2]:.4f} (ObsoleteTB) based on counts {class_counts}")
+        class_alphas.append(alpha)
+    print(f"  Class priors: ch0={class_priors[0]:.4f}, ch1={class_priors[1]:.4f}, ch2={class_priors[2]:.4f}")
+    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB), ch2={class_alphas[2]:.3f} (unused) based on counts {class_counts}")
 
     raw_model, use_pretrained = build_efficientdet(cfg, class_priors=class_priors)
     raw_model.to(device)
