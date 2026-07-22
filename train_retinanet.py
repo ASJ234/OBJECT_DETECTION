@@ -230,7 +230,14 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 # =============================================================================
 # Build RetinaNet with optional custom anchors for small lesions
 # =============================================================================
-def build_retinanet(cfg):
+def _apply_class_priors(model, num_classes, class_priors):
+    import math
+    bias = model.head.classification_head.cls_logits.bias
+    for c, pi in enumerate(class_priors):
+        mask = torch.arange(bias.size(0), device=bias.device) % num_classes == c
+        bias.data[mask] = -math.log((1 - pi) / pi)
+
+def build_retinanet(cfg, class_priors=None):
     num_classes = cfg["model"]["num_classes"]
     use_custom = cfg["model"].get("use_custom_anchors", True)
     use_pretrained = False
@@ -283,6 +290,8 @@ def build_retinanet(cfg):
                 aspect_ratios = cfg["model"]["aspect_ratios"]
                 model.anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
 
+    if class_priors:
+        _apply_class_priors(model, num_classes, class_priors)
     return model, use_pretrained
 
 
@@ -329,7 +338,26 @@ def train(cfg):
         pin_memory=True,
     )
 
-    model, use_pretrained = build_retinanet(cfg)
+    class_counts = {}
+    for idx in range(len(train_dataset)):
+        ann_ids = train_dataset.coco.getAnnIds(imgIds=train_dataset.ids[idx])
+        for ann in train_dataset.coco.loadAnns(ann_ids):
+            cid = ann['category_id']
+            class_counts[cid] = class_counts.get(cid, 0) + 1
+    min_count = min(class_counts.values())
+    n_classes = cfg["model"]["num_classes"]
+    class_priors = []
+    for ch in range(n_classes):
+        label = ch + 1
+        if label in class_counts:
+            pi = 0.01 * (min_count / max(class_counts[label], 1))
+        else:
+            pi = 0.001
+        pi = max(0.001, min(0.05, pi))
+        class_priors.append(pi)
+    print(f"  Class priors for bias init: ch0={class_priors[0]:.4f} (unused), ch1={class_priors[1]:.4f} (ActiveTB), ch2={class_priors[2]:.4f} (ObsoleteTB) based on counts {class_counts}")
+
+    model, use_pretrained = build_retinanet(cfg, class_priors=class_priors)
     model.to(device)
 
     ema = ModelEMA(model, decay=cfg["training"]["ema_decay"])

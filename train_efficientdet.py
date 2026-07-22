@@ -279,7 +279,8 @@ class EfficientDetWrapper(nn.Module):
 # =============================================================================
 # Build EfficientDet
 # =============================================================================
-def build_efficientdet(cfg):
+def build_efficientdet(cfg, class_priors=None):
+    import math
     if not HAS_EFFDET:
         raise ImportError(
             "effdet not installed. Install with: pip install effdet"
@@ -298,6 +299,17 @@ def build_efficientdet(cfg):
         raw_model = create_model(
             "tf_efficientdet_d2", pretrained=False, num_classes=num_classes,
         )
+
+    if class_priors:
+        if hasattr(raw_model.class_net.predict, 'conv_pw'):
+            bias = raw_model.class_net.predict.conv_pw.bias
+        else:
+            bias = raw_model.class_net.predict.conv.bias
+        n_anchors = bias.numel() // num_classes
+        bias_view = bias.data.view(n_anchors, num_classes)
+        for c, pi in enumerate(class_priors):
+            bias_view[:, c] = -math.log((1 - pi) / pi)
+
     return raw_model, use_pretrained
 
 
@@ -381,7 +393,26 @@ def train(cfg):
         pin_memory=True,
     )
 
-    raw_model, use_pretrained = build_efficientdet(cfg)
+    class_counts = {}
+    for idx in range(len(train_dataset)):
+        ann_ids = train_dataset.coco.getAnnIds(imgIds=train_dataset.ids[idx])
+        for ann in train_dataset.coco.loadAnns(ann_ids):
+            cid = ann['category_id']
+            class_counts[cid] = class_counts.get(cid, 0) + 1
+    min_count = min(class_counts.values())
+    n_classes = cfg["model"]["num_classes"]
+    class_priors = []
+    for ch in range(n_classes):
+        label = ch + 1
+        if label in class_counts:
+            pi = 0.01 * (min_count / max(class_counts[label], 1))
+        else:
+            pi = 0.001
+        pi = max(0.001, min(0.05, pi))
+        class_priors.append(pi)
+    print(f"  Class priors for bias init: ch0={class_priors[0]:.4f} (unused), ch1={class_priors[1]:.4f} (ActiveTB), ch2={class_priors[2]:.4f} (ObsoleteTB) based on counts {class_counts}")
+
+    raw_model, use_pretrained = build_efficientdet(cfg, class_priors=class_priors)
     raw_model.to(device)
     bench_train = DetBenchTrain(raw_model).to(device)
 

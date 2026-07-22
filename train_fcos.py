@@ -225,7 +225,7 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 # =============================================================================
 # Model Initialization
 # =============================================================================
-def get_fcos_model(num_classes, score_thresh=0.05):
+def get_fcos_model(num_classes, score_thresh=0.05, class_priors=None):
     import math
     model = fcos_resnet50_fpn(weights="DEFAULT", score_thresh=score_thresh)
     in_channels = model.head.classification_head.cls_logits.in_channels
@@ -236,7 +236,13 @@ def get_fcos_model(num_classes, score_thresh=0.05):
         in_channels, num_anchors * num_classes, kernel_size=3, stride=1, padding=1
     )
     
-    torch.nn.init.constant_(model.head.classification_head.cls_logits.bias, -math.log((1 - 0.01) / 0.01))
+    bias = model.head.classification_head.cls_logits.bias
+    if class_priors:
+        for i, pi in enumerate(class_priors):
+            start = i * num_anchors
+            bias.data[start:start + num_anchors] = -math.log((1 - pi) / pi)
+    else:
+        torch.nn.init.constant_(bias, -math.log((1 - 0.01) / 0.01))
     torch.nn.init.normal_(model.head.classification_head.cls_logits.weight, std=0.01)
     return model
 
@@ -284,10 +290,31 @@ def train(cfg):
         pin_memory=True,
     )
 
+    class_counts = {}
+    for idx in range(len(train_dataset)):
+        ann_ids = train_dataset.coco.getAnnIds(imgIds=train_dataset.ids[idx])
+        for ann in train_dataset.coco.loadAnns(ann_ids):
+            cid = ann['category_id']
+            class_counts[cid] = class_counts.get(cid, 0) + 1
+    total = max(sum(class_counts.values()), 1)
+    min_count = min(class_counts.values())
+    n_classes = cfg["model"]["num_classes"]
+    class_priors = []
+    for ch in range(n_classes):
+        label = ch + 1
+        if label in class_counts:
+            pi = 0.01 * (min_count / max(class_counts[label], 1))
+        else:
+            pi = 0.001
+        pi = max(0.001, min(0.05, pi))
+        class_priors.append(pi)
+    print(f"  Class priors for bias init: ch0={class_priors[0]:.4f} (unused), ch1={class_priors[1]:.4f} (ActiveTB), ch2={class_priors[2]:.4f} (ObsoleteTB) based on counts {class_counts}")
+
     try:
         model = get_fcos_model(
             num_classes=cfg["model"]["num_classes"],
             score_thresh=0.05,
+            class_priors=class_priors,
         )
         use_pretrained = True
         print("  Loaded pretrained COCO weights and replaced head")
