@@ -60,7 +60,7 @@ DEFAULT_CONFIG = {
         "lr_transformer": 1e-4,
         "lr_head": 1e-4,
         "weight_decay": 1e-4,
-        "clip_norm": 0.1,
+        "clip_norm": 5.0,
         "warmup_epochs": 10,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
@@ -71,10 +71,10 @@ DEFAULT_CONFIG = {
     },
     "augmentation": {
         "hflip_prob": 0.5,
-        "brightness": 0.3,
-        "contrast": 0.3,
-        "gamma": 0.2,
-        "noise_std": 0.05,
+        "brightness": 0.1,
+        "contrast": 0.1,
+        "gamma": 0.0,
+        "noise_std": 0.0,
         "normalize": True,
     },
     "data": {
