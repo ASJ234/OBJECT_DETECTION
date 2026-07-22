@@ -37,7 +37,7 @@ from utils.engine import (
     set_seed, MetricTracker, save_checkpoint, load_checkpoint,
     evaluate, evaluate_test,
     compute_confusion_matrix, save_confusion_matrix_plot,
-    plot_training_curves,
+    plot_training_curves, _worker_init_fn, gpu_cleanup,
 )
 from utils.ema import ModelEMA
 from explain.gradcam import GradCAM
@@ -385,12 +385,12 @@ def train(cfg):
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, sampler=sampler,
         collate_fn=collate_train, num_workers=cfg["data"]["num_workers"],
-        drop_last=True, pin_memory=True,
+        drop_last=True, pin_memory=True, worker_init_fn=_worker_init_fn,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False,
         collate_fn=collate_val, num_workers=cfg["data"]["num_workers"],
-        pin_memory=True,
+        pin_memory=True, worker_init_fn=_worker_init_fn,
     )
 
     class_counts = {}
@@ -654,6 +654,7 @@ def evaluate_model(cfg):
         val_dataset, batch_size=cfg["training"]["batch_size"],
         shuffle=False, collate_fn=collate_fn,
         num_workers=cfg["data"]["num_workers"],
+        worker_init_fn=_worker_init_fn,
     )
 
     raw_model, _ = build_efficientdet(cfg)
@@ -733,6 +734,7 @@ def evaluate_model(cfg):
             test_dataset, batch_size=cfg["training"]["batch_size"],
             shuffle=False, collate_fn=collate_fn,
             num_workers=cfg["data"]["num_workers"],
+            worker_init_fn=_worker_init_fn,
         )
         evaluate_test(
             wrapper, test_loader, device,
@@ -785,6 +787,7 @@ def run_xai(cfg):
     loader = DataLoader(
         xai_dataset, batch_size=1, shuffle=False,
         collate_fn=collate_val, num_workers=2,
+        worker_init_fn=_worker_init_fn,
     )
 
     wrapper = EfficientDetWrapper(raw_model, score_thresh=0.3)
@@ -834,7 +837,9 @@ def main():
         return
     cfg = get_config()
     train(cfg)
+    gpu_cleanup()
     evaluate_model(cfg)
+    gpu_cleanup()
     run_xai(cfg)
 
 

@@ -31,7 +31,7 @@ from utils.engine import (
     set_seed, MetricTracker, save_checkpoint, load_checkpoint,
     train_one_epoch, evaluate, evaluate_test,
     compute_confusion_matrix, save_confusion_matrix_plot,
-    plot_training_curves,
+    plot_training_curves, _worker_init_fn, gpu_cleanup,
 )
 from utils.ema import ModelEMA
 from explain.gradcam import GradCAM, get_target_layer
@@ -367,12 +367,12 @@ def train(cfg):
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, sampler=sampler,
         collate_fn=collate_fn, num_workers=cfg["data"]["num_workers"],
-        drop_last=True, pin_memory=True,
+        drop_last=True, pin_memory=True, worker_init_fn=_worker_init_fn,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False,
         collate_fn=collate_fn, num_workers=cfg["data"]["num_workers"],
-        pin_memory=True,
+        pin_memory=True, worker_init_fn=_worker_init_fn,
     )
 
     class_counts = {}
@@ -588,6 +588,7 @@ def evaluate_model(cfg):
         val_dataset, batch_size=cfg["training"]["batch_size"],
         shuffle=False, collate_fn=collate_fn,
         num_workers=cfg["data"]["num_workers"],
+        worker_init_fn=_worker_init_fn,
     )
 
     model, _ = build_retinanet(cfg)
@@ -663,6 +664,7 @@ def evaluate_model(cfg):
             test_dataset, batch_size=cfg["training"]["batch_size"],
             shuffle=False, collate_fn=collate_fn,
             num_workers=cfg["data"]["num_workers"],
+            worker_init_fn=_worker_init_fn,
         )
         evaluate_test(
             model, test_loader, device,
@@ -711,6 +713,7 @@ def run_xai(cfg):
     loader = DataLoader(
         xai_dataset, batch_size=1, shuffle=False,
         collate_fn=collate_fn, num_workers=2,
+        worker_init_fn=_worker_init_fn,
     )
 
     target_layer = get_target_layer(model, "retinanet")
@@ -834,7 +837,9 @@ def run_xai(cfg):
 def main():
     cfg = get_config()
     train(cfg)
+    gpu_cleanup()
     evaluate_model(cfg)
+    gpu_cleanup()
     run_xai(cfg)
 
 

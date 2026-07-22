@@ -5,6 +5,7 @@ import os
 import json
 import csv
 import time
+import gc
 import random
 import copy
 import logging
@@ -29,6 +30,21 @@ CLASS_NAMES = ['Background', 'ActiveTuberculosis', 'ObsoletePulmonaryTuberculosi
 NUM_CLASSES = 3
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_init_fn(worker_id: int):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def gpu_cleanup(*models):
+    for m in models:
+        del m
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
 
 def set_seed(seed=42):
