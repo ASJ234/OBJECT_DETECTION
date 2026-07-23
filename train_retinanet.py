@@ -53,8 +53,8 @@ DEFAULT_CONFIG = {
     "training": {
         "epochs": 50,
         "batch_size": 16,
-        "lr": 0.01,
-        "optimizer": "SGD",
+        "lr": 0.001,
+        "optimizer": "AdamW",
         "weight_decay": 1e-4,
         "momentum": 0.9,
         "clip_norm": 5.0,

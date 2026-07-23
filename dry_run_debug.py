@@ -134,7 +134,13 @@ def dry_run_train(model, dataset):
             images = [img.to(DEVICE) for img in images]
             targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
 
-            losses = model(images, targets)
+            # Convert labels from COCO 1-indexed to 0-indexed for FCOS
+            adj_targets = []
+            for t in targets:
+                t_adj = {k: v.clone() for k, v in t.items()}
+                t_adj["labels"] = t_adj["labels"] - 1
+                adj_targets.append(t_adj)
+            losses = model(images, adj_targets)
             loss = sum(losses.values())
             optimizer.zero_grad()
             loss.backward()
@@ -188,9 +194,13 @@ def check_coco_eval_format(all_preds):
     print(f"  Predicted label set: {pred_labels}")
     print(f"  GT label set: {set(gt_cat_ids)}")
 
+    expected_eval = {c - 1 for c in gt_cat_ids}
     if pred_labels and not pred_labels.issubset(set(gt_cat_ids)):
-        print("  *** WARNING: Predicted labels DON'T match GT categories!")
-        print("  *** This would cause COCO eval to ignore all predictions!")
+        if pred_labels.issubset(expected_eval):
+            print("  OK: Model outputs 0-indexed labels — evaluate() will add +1 for COCO")
+        else:
+            print("  *** WARNING: Predicted labels DON'T match GT categories!")
+            print("  *** This would cause COCO eval to ignore all predictions!")
     elif not pred_labels:
         print("  *** WARNING: No predictions at all — nothing to evaluate!")
     else:

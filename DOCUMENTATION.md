@@ -13,10 +13,10 @@ This project trains and evaluates **4 distinct object detection architectures** 
 
 | # | Model | Type | Framework | Batch | Epochs | Optimizer | LR |
 |---|-------|------|-----------|-------|--------|-----------|-----|
-| 1 | **FCOS** | Anchor-free one-stage | TorchVision | 8 | 100 | SGD | 0.01 (cosine) |
-| 2 | **EfficientDet-D2** | BiFPN multi-scale | `effdet` + `timm` | 8 | 100 | AdamW | 1e-4 (cosine) |
-| 3 | **RetinaNet** | One-stage focal loss | TorchVision | 8 | 100 | SGD | 0.005 (cosine) |
-| 4 | **DETR** | Transformer-based (end-to-end) | TorchVision | 4 | 100 | AdamW | 1e-4 (cosine) |
+| 1 | **FCOS** | Anchor-free one-stage | TorchVision | 16 | 50 | AdamW | 0.01 (cosine) |
+| 2 | **EfficientDet-D2** | BiFPN multi-scale | `effdet` + `timm` | 16 | 50 | AdamW | 5e-3 (cosine) |
+| 3 | **RetinaNet** | One-stage focal loss | TorchVision | 16 | 50 | AdamW | 0.01 (cosine) |
+| 4 | **DETR** | Transformer-based (end-to-end) | HuggingFace | 8 (eff. 32) | 50 | AdamW | 1e-4 (cosine) |
 
 ## Project Structure
 
