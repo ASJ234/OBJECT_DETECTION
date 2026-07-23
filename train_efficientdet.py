@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
         "img_size": IMG_SIZE,
     },
     "training": {
-        "epochs": 100,
+        "epochs": 50,
         "batch_size": 16,
         "lr": 5e-3,
         "lr_backbone": 5e-4,

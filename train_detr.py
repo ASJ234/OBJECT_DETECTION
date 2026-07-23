@@ -50,7 +50,7 @@ DEFAULT_CONFIG = {
         "num_classes": NUM_CLASSES,
     },
     "training": {
-        "epochs": 150,
+        "epochs": 50,
         "batch_size": 8,
         "lr_backbone": 1e-5,
         "lr_transformer": 1e-4,

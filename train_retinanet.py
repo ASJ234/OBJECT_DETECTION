@@ -51,7 +51,7 @@ DEFAULT_CONFIG = {
         "aspect_ratios": ((0.5, 1.0, 2.0),) * 5,
     },
     "training": {
-        "epochs": 100,
+        "epochs": 50,
         "batch_size": 16,
         "lr": 0.01,
         "optimizer": "SGD",

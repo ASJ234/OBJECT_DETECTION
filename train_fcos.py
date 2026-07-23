@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
         "num_classes": 2,
     },
     "training": {
-        "epochs": 100,
+        "epochs": 50,
         "batch_size": 16,
         "lr": 0.01,
         "optimizer": "SGD",
