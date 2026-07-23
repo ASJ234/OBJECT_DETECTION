@@ -1,6 +1,7 @@
 import os
 import json
 import glob
+import argparse
 from collections import Counter
 from statistics import mean, median
 
@@ -361,6 +362,13 @@ def print_dataset_summary(records):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='EDA for TBX11K')
+    parser.add_argument('--data-root', type=str, default='images', help='Path to Images directory')
+    args = parser.parse_args()
+
+    global DATA_ROOT
+    DATA_ROOT = args.data_root
+
     print('Loading annotations...')
     records = load_annotations()
     print(f'Loaded {len(records)} annotation files.\n')
