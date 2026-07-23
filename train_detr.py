@@ -269,7 +269,6 @@ class DetrHFWrapper(torch.nn.Module):
         for i in range(logits.shape[0]):
             probs = torch.softmax(logits[i], dim=-1)
             scores, labels = probs[:, :-1].max(dim=-1)
-            labels = labels + 1
             boxes = pred_boxes[i]
             boxes_abs = boxes.clone()
             boxes_abs[:, 0] *= w
@@ -763,11 +762,11 @@ def run_xai(cfg):
             if sc < 0.3:
                 continue
             x1, y1, x2, y2 = box[:4]
-            color = CLASS_COLORS.get(int(lb), (255, 255, 0))
+            color = CLASS_COLORS.get(int(lb) + 1, (255, 255, 0))
             draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
             draw.text(
                 (x1 + 2, y1 - 16),
-                f'{CLASS_NAMES.get(int(lb), str(lb))}: {sc:.2f}',
+                f'{CLASS_NAMES.get(int(lb) + 1, str(lb + 1))}: {sc:.2f}',
                 fill=color,
             )
         axes[0].imshow(np.array(draw_img))

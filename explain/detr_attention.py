@@ -67,7 +67,7 @@ class DETRAttentionExtractor:
             meta.append({
                 'query_idx': q_idx,
                 'score': float(pred_scores[q_idx]),
-                'label': int(pred_labels[q_idx]),
+                'label': int(pred_labels[q_idx]) + 1,
                 'box': pred_boxes[q_idx].tolist(),
             })
 

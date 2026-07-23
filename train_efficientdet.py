@@ -190,61 +190,63 @@ class AugmentedTransform:
 # =============================================================================
 # EfficientDet Collate — resizes images AND scales bounding boxes
 # =============================================================================
+def collate_effdet(batch, img_size=IMG_SIZE):
+    images, targets = zip(*batch)
+    orig_h, orig_w = images[0].shape[1], images[0].shape[2]
+    scale_x = img_size / orig_w
+    scale_y = img_size / orig_h
+
+    resized = []
+    scaled_targets = []
+    for img, target in zip(images, targets):
+        resized.append(
+            F_interp.interpolate(
+                img.unsqueeze(0), size=(img_size, img_size),
+                mode="bilinear", align_corners=False,
+            ).squeeze(0)
+        )
+        new_target = {}
+        for k, v in target.items():
+            if k == "boxes" and len(v) > 0:
+                boxes = v.clone()
+                boxes[:, [0, 2]] *= scale_x
+                boxes[:, [1, 3]] *= scale_y
+                new_target[k] = boxes
+            else:
+                new_target[k] = v
+        scaled_targets.append(new_target)
+
+    images = torch.stack(resized)
+
+    cls_list = [t["labels"] for t in scaled_targets]
+    box_list = [t["boxes"] for t in scaled_targets]
+    device = box_list[0].device if len(box_list) > 0 else torch.device("cpu")
+    batch_size = len(cls_list)
+    max_boxes = max((len(c) for c in cls_list), default=1)
+    max_boxes = max(max_boxes, 1)
+
+    cls_pad = torch.zeros(batch_size, max_boxes, dtype=torch.int64, device=device)
+    box_pad = torch.zeros(batch_size, max_boxes, 4, dtype=torch.float32, device=device)
+
+    for i in range(batch_size):
+        n = min(len(cls_list[i]), max_boxes)
+        if n > 0:
+            cls_pad[i, :n] = cls_list[i][:n]
+            box_pad[i, :n] = box_list[i][:n]
+
+    return images, {
+        "cls": cls_pad,
+        "bbox": box_pad,
+        "img_scale": torch.ones(batch_size, 1, device=device),
+        "img_size": torch.full(
+            (batch_size, 2), img_size, dtype=torch.float32, device=device,
+        ),
+    }
+
+
 def make_collate_fn(img_size=IMG_SIZE):
-    def collate_effdet(batch):
-        images, targets = zip(*batch)
-        orig_h, orig_w = images[0].shape[1], images[0].shape[2]
-        scale_x = img_size / orig_w
-        scale_y = img_size / orig_h
-
-        resized = []
-        scaled_targets = []
-        for img, target in zip(images, targets):
-            resized.append(
-                F_interp.interpolate(
-                    img.unsqueeze(0), size=(img_size, img_size),
-                    mode="bilinear", align_corners=False,
-                ).squeeze(0)
-            )
-            new_target = {}
-            for k, v in target.items():
-                if k == "boxes" and len(v) > 0:
-                    boxes = v.clone()
-                    boxes[:, [0, 2]] *= scale_x
-                    boxes[:, [1, 3]] *= scale_y
-                    new_target[k] = boxes
-                else:
-                    new_target[k] = v
-            scaled_targets.append(new_target)
-
-        images = torch.stack(resized)
-
-        cls_list = [t["labels"] for t in scaled_targets]
-        box_list = [t["boxes"] for t in scaled_targets]
-        device = box_list[0].device if len(box_list) > 0 else torch.device("cpu")
-        batch_size = len(cls_list)
-        max_boxes = max((len(c) for c in cls_list), default=1)
-        max_boxes = max(max_boxes, 1)
-
-        cls_pad = torch.zeros(batch_size, max_boxes, dtype=torch.int64, device=device)
-        box_pad = torch.zeros(batch_size, max_boxes, 4, dtype=torch.float32, device=device)
-
-        for i in range(batch_size):
-            n = min(len(cls_list[i]), max_boxes)
-            if n > 0:
-                cls_pad[i, :n] = cls_list[i][:n]
-                box_pad[i, :n] = box_list[i][:n]
-
-        return images, {
-            "cls": cls_pad,
-            "bbox": box_pad,
-            "img_scale": torch.ones(batch_size, 1, device=device),
-            "img_size": torch.full(
-                (batch_size, 2), img_size, dtype=torch.float32, device=device,
-            ),
-        }
-
-    return collate_effdet
+    from functools import partial
+    return partial(collate_effdet, img_size=img_size)
 
 
 # =============================================================================
