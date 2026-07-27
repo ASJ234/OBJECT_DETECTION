@@ -1,34 +1,31 @@
-# FCOS Training Stagnation Fix
+# Fix Bounding Box Regression Stagnation
 
-The FCOS model is failing to converge (mAP remains 0.000) and producing low-confidence predictions. After investigating the logs and codebase, I've identified three critical issues causing this stagnation:
+The `mAP=0.0000` issue in FCOS is now purely a bounding box regression problem. The classification head is successfully learning (scores are rising, labels match correctly), but the regression head is failing to produce boxes with IoU >= 0.50 (max IoU is stuck around 0.36).
 
-## User Review Required
-Please review the proposed architectural and training fixes. These changes will significantly alter the learning dynamics and should allow the model to properly converge on the TBX11K dataset.
+## Root Cause Analysis
+In the previous optimizer update, we split the parameters into three groups:
+1. `backbone_params` (LR: 1e-5)
+2. `pretrained_head_params` (LR: 1e-5)
+3. `new_head_params` (LR: 1e-4)
+
+The bounding box regression layer (`bbox_pred`) was placed into `pretrained_head_params` and restricted to an extremely low learning rate (`1e-5`). Because it was pretrained on COCO (which has mostly large objects), it naturally outputs large boxes. The `1e-5` learning rate is too slow to allow the regression head to adapt to the small, localized TB lesions within 10 epochs, resulting in massive false positives and 0 mAP.
 
 ## Proposed Changes
 
-### 1. Stable Focal Loss Implementation
-**Problem**: The custom `_per_class_focal_loss` uses a naive PyTorch implementation of focal loss (`ce_loss * (1 - p_t)^gamma`). When backpropagating through `(1 - p_t)^gamma`, numerical instability and vanishing gradients often occur because `p_t` contains the sigmoid computation in the autograd graph.
-**Solution**: Replace the naive implementation with `torchvision.ops.sigmoid_focal_loss`, which is written in C++ and uses an analytic backward pass for guaranteed numerical stability. We will apply it per-channel to support per-class alphas.
+We will unify all head parameters into a single `head_params` group with the base learning rate (`1e-4`), allowing the regression layers to aggressively adapt to the TB dataset sizes while keeping the backbone frozen/slow at `1e-5`.
 
-### 2. Pretrained Weights Destruction (Optimizer Groups)
-**Problem**: The model initializes `cls_logits` randomly but keeps the highly optimized COCO pretrained weights for the rest of the classification head and the entire regression head. The optimizer applies a high learning rate (`1e-4`) to the *entire* head, which blasts the delicate pretrained regression weights, destroying their ability to localize objects (causing the erratic bounding boxes seen in the logs).
-**Solution**: Split the optimizer parameter groups into three tiers:
-- `backbone_params` (ResNet): `1e-5`
-- `pretrained_head_params` (Pretrained convolutions & regression): `1e-5`
-- `new_head_params` (Randomly initialized `cls_logits`): `1e-4`
+### [train_fcos.py](file:///home/asj/Internship/OBJECT_DETECTION/train_fcos.py)
+- **[MODIFY]** Remove the three-tier optimizer grouping.
+- **[MODIFY]** Group all parameters not containing "backbone", "body", or "fpn" into a single `head_params` list.
+- **[MODIFY]** Apply `lr: scaled_lr` to `head_params`, and `lr: scaled_lr * 0.1` to `backbone_params`.
 
-### 3. Class Priors Initialization
-**Problem**: The `class_priors` logic dynamically scales the focal loss initialization bias `pi` based on class frequency. This sets `pi=0.01` for the rare class (ActiveTB) but `pi=0.0028` for the frequent class (ObsoleteTB). Focal loss expects all foreground classes to start at `pi=0.01` to prevent the background loss from dominating early training. Starting at `0.0028` creates a massive initial gradient that destabilizes the early epochs.
-**Solution**: Hardcode the initial prior `pi = 0.01` for all foreground classes, which is the standard practice for Focal Loss.
-
-#### [MODIFY] train_fcos.py
-- Update `_patch_fcos_loss` to loop over channels and use `torchvision.ops.sigmoid_focal_loss`.
-- Update the optimizer parameter grouping to separate `pretrained_head_params` and `new_head_params`.
-- Simplify the `class_priors` loop to use `pi = 0.01` consistently.
+### [train_retinanet.py](file:///home/asj/Internship/OBJECT_DETECTION/train_retinanet.py)
+- **[MODIFY]** Apply the exact same two-tier optimizer grouping (`backbone_params` vs `head_params`) to ensure the RetinaNet regression head can also learn effectively.
 
 ## Verification Plan
+1. Apply the code edits to both scripts.
+2. The user will restart `train_fcos.py` from scratch.
+3. We expect the `max_iou_per_pred` to rapidly climb above 0.50 within the first 5-10 epochs, breaking the 0 mAP deadlock.
 
-### Automated Tests
-- The user can resume or restart training using `python train_fcos.py`. We expect the `Avg Loss` to drop steadily below 0.7 and the `mAP` to rise above 0.000 within the first 5-10 epochs.
-- We will monitor the evaluation logs to ensure that `pred_scores` increase beyond the `0.11` floor, indicating that the model is successfully distinguishing foreground objects.
+> [!NOTE]
+> EfficientDet and DETR already use this two-tier approach (backbone vs. head), so they do not require this fix.

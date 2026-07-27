@@ -391,24 +391,20 @@ def train(cfg):
 
     scaled_lr = scale_lr(cfg["training"]["lr"], batch_size)
     backbone_params = []
-    pretrained_head_params = []
-    new_head_params = []
+    head_params = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
         if "backbone" in name or "body" in name or "fpn" in name:
             backbone_params.append(param)
-        elif "classification_head" in name:
-            new_head_params.append(param)
         else:
-            pretrained_head_params.append(param)
+            head_params.append(param)
 
     if cfg["training"]["optimizer"] == "AdamW":
         optimizer = torch.optim.AdamW(
             [
                 {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": pretrained_head_params, "lr": scaled_lr * 0.1},
-                {"params": new_head_params, "lr": scaled_lr},
+                {"params": head_params, "lr": scaled_lr},
             ],
             weight_decay=cfg["training"]["weight_decay"],
         )
@@ -416,8 +412,7 @@ def train(cfg):
         optimizer = torch.optim.SGD(
             [
                 {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": pretrained_head_params, "lr": scaled_lr * 0.1},
-                {"params": new_head_params, "lr": scaled_lr},
+                {"params": head_params, "lr": scaled_lr},
             ],
             momentum=cfg["training"]["momentum"],
             weight_decay=cfg["training"]["weight_decay"],
