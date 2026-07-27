@@ -53,7 +53,7 @@ DEFAULT_CONFIG = {
     "training": {
         "epochs": 50,
         "batch_size": 16,
-        "lr": 0.001,
+        "lr": 1e-4,
         "optimizer": "AdamW",
         "weight_decay": 1e-4,
         "momentum": 0.9,
@@ -391,8 +391,7 @@ def train(cfg):
         label = ch + 1
         if label in class_counts:
             pi = 0.01 * (min_count / max(class_counts[label], 1))
-            ratio = class_counts[label] / max_count
-            alpha = 0.90 - 0.65 * (ratio * ratio)
+            alpha = 0.25
         else:
             pi = 0.001
             alpha = 0.25
