@@ -9,6 +9,32 @@ This project trains and evaluates **4 distinct object detection architectures** 
 | ActiveTuberculosis | ActiveTB | Active tuberculosis lesions | 972 |
 | ObsoletePulmonaryTuberculosis | ObsoleteTB | Healed/obsolete TB scarring | 239 |
 
+## Dataset Classes
+
+### Why 2 Classes?
+
+Object detection models require **bounding box annotations** for each class they detect. The TBX11K dataset only provides bounding box annotations for 2 classes: `ActiveTuberculosis` and `ObsoletePulmonaryTuberculosis`. Without bounding box labels, a model cannot learn to localize and classify objects.
+
+### Image-Level Tags vs. Bounding Box Classes
+
+The dataset contains two types of annotations:
+
+| Type | Examples | Used for Training | Purpose |
+|------|----------|-------------------|---------|
+| **Bounding box classes** | ActiveTuberculosis, ObsoletePulmonaryTuberculosis | Yes | Define what the model learns to detect |
+| **Image-level tags** | `healthy`, `sick_but_non-tb`, `active_tb`, `latent_tb`, `active&latent_tb` | No | Metadata indicating image source/context |
+
+The image-level tags help understand data distribution but are **not** used as training classes. Images with tags like `healthy` or `sick_but_non-tb` have **zero bounding boxes** and serve as **negative samples** during training — they teach the model what "no detection" looks like, reducing false positives.
+
+### num_classes Across Models
+
+| Model | `num_classes` | Reason |
+|-------|---------------|--------|
+| FCOS | 2 | TorchVision handles background implicitly via score threshold |
+| RetinaNet | 2 | TorchVision handles background implicitly via score threshold |
+| DETR | 3 | HuggingFace DETR requires explicit background class (class 0) for Hungarian matching |
+| EfficientDet | 3 | `effdet` library expects background as class 0 |
+
 ## Architectures
 
 | # | Model | Type | Framework | Batch | Epochs | Optimizer | LR |
@@ -134,6 +160,7 @@ results/
 | Mean aspect ratio 0.97 (roughly square) | Default anchor boxes are appropriate |
 | Test set has no ground-truth boxes | Inference-only on test; evaluation on val set |
 | `healthy`/`sick_but_non-tb` tags have zero boxes | Include as negative samples to reduce false positives |
+| Image-level tags (5 types) exist alongside bounding boxes | Tags are informational only — not used as training classes |
 
 ## XAI Methods
 
