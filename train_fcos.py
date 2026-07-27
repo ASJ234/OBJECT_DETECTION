@@ -225,21 +225,6 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 # =============================================================================
 # Model Initialization
 # =============================================================================
-def _per_class_focal_loss(inputs, targets, alphas, gamma=2.0, reduction="sum"):
-    p = torch.sigmoid(inputs)
-    ce_loss = torch.nn.functional.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
-    p_t = p * targets + (1 - p) * (1 - targets)
-    loss = ce_loss * ((1 - p_t) ** gamma)
-    if alphas is not None:
-        alphas = alphas.to(loss.device, loss.dtype)
-        alpha_t = targets * alphas + (1 - targets) * (1 - alphas)
-        loss = alpha_t * loss
-    if reduction == "sum":
-        return loss.sum()
-    elif reduction == "mean":
-        return loss.mean()
-    return loss
-
 def _patch_fcos_loss(head, class_alphas):
     import torchvision.ops as ops
     original_fn = head.compute_loss
@@ -270,7 +255,14 @@ def _patch_fcos_loss(head, class_alphas):
 
         gt_classes_targets = torch.zeros_like(cls_logits)
         gt_classes_targets[foregroud_mask, all_gt_classes_targets[foregroud_mask]] = 1.0
-        loss_cls = _per_class_focal_loss(cls_logits, gt_classes_targets, alphas=class_alphas.to(cls_logits.device), reduction="sum")
+        
+        loss_cls = 0.0
+        for c in range(cls_logits.shape[-1]):
+            alpha = class_alphas[c].item() if class_alphas is not None else 0.25
+            loss_cls += ops.sigmoid_focal_loss(
+                cls_logits[..., c], gt_classes_targets[..., c],
+                alpha=alpha, reduction="sum"
+            )
 
         pred_boxes = self.box_coder.decode(bbox_regression, anchors)
         loss_bbox_reg = ops.generalized_box_iou_loss(
@@ -379,15 +371,8 @@ def train(cfg):
     class_alphas = []
     label_names = {1: "ActiveTB", 2: "ObsoleteTB"}
     for ch in range(n_classes):
-        label = ch + 1
-        if label in class_counts:
-            pi = 0.01 * (min_count / max(class_counts[label], 1))
-            alpha = 0.25
-        else:
-            pi = 0.001
-            alpha = 0.25
-        pi = max(0.001, min(0.05, pi))
-        alpha = max(0.25, min(0.90, alpha))
+        pi = 0.01
+        alpha = 0.25
         class_priors.append(pi)
         class_alphas.append(alpha)
     print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB)")
@@ -418,20 +403,24 @@ def train(cfg):
 
     scaled_lr = scale_lr(cfg["training"]["lr"], batch_size)
     backbone_params = []
-    head_params = []
+    pretrained_head_params = []
+    new_head_params = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if "backbone" in name or "body" in name:
+        if "backbone" in name or "body" in name or "fpn" in name:
             backbone_params.append(param)
+        elif "cls_logits" in name:
+            new_head_params.append(param)
         else:
-            head_params.append(param)
+            pretrained_head_params.append(param)
 
     if cfg["training"]["optimizer"] == "AdamW":
         optimizer = torch.optim.AdamW(
             [
                 {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": head_params, "lr": scaled_lr},
+                {"params": pretrained_head_params, "lr": scaled_lr * 0.1},
+                {"params": new_head_params, "lr": scaled_lr},
             ],
             weight_decay=cfg["training"]["weight_decay"],
         )
@@ -439,7 +428,8 @@ def train(cfg):
         optimizer = torch.optim.SGD(
             [
                 {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": head_params, "lr": scaled_lr},
+                {"params": pretrained_head_params, "lr": scaled_lr * 0.1},
+                {"params": new_head_params, "lr": scaled_lr},
             ],
             momentum=cfg["training"]["momentum"],
             weight_decay=cfg["training"]["weight_decay"],

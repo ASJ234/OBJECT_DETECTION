@@ -273,7 +273,7 @@ class EfficientDetWrapper(nn.Module):
             results.append({
                 "boxes": dets[:, :4],
                 "scores": dets[:, 4],
-                "labels": dets[:, 5].int(),
+                "labels": dets[:, 5].int() - 1,  # effdet outputs 1-based; engine.py expects 0-based
             })
         return results
 
@@ -408,16 +408,8 @@ def train(cfg):
     class_priors = []
     class_alphas = []
     for ch in range(n_classes):
-        label = ch + 1
-        if label in class_counts:
-            pi = 0.01 * (min_count / max(class_counts[label], 1))
-            ratio = class_counts[label] / max_count
-            alpha = 0.90 - 0.65 * (ratio * ratio)
-        else:
-            pi = 0.001
-            alpha = 0.25
-        pi = max(0.001, min(0.05, pi))
-        alpha = max(0.25, min(0.90, alpha))
+        pi = 0.01
+        alpha = 0.25
         class_priors.append(pi)
         class_alphas.append(alpha)
     print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB), ch2={class_priors[2]:.4f} (unused)")

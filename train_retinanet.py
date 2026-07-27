@@ -230,21 +230,6 @@ def scale_lr(base_lr, batch_size, reference_bs=16):
 # =============================================================================
 # Build RetinaNet with optional custom anchors for small lesions
 # =============================================================================
-def _per_class_focal_loss(inputs, targets, alphas, gamma=2.0, reduction="sum"):
-    p = torch.sigmoid(inputs)
-    ce_loss = torch.nn.functional.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
-    p_t = p * targets + (1 - p) * (1 - targets)
-    loss = ce_loss * ((1 - p_t) ** gamma)
-    if alphas is not None:
-        alphas = alphas.to(loss.device, loss.dtype)
-        alpha_t = targets * alphas + (1 - targets) * (1 - alphas)
-        loss = alpha_t * loss
-    if reduction == "sum":
-        return loss.sum()
-    elif reduction == "mean":
-        return loss.mean()
-    return loss
-
 def _apply_class_priors(model, num_classes, class_priors):
     import math
     bias = model.head.classification_head.cls_logits.bias
@@ -253,7 +238,7 @@ def _apply_class_priors(model, num_classes, class_priors):
         bias.data[mask] = -math.log((1 - pi) / pi)
 
 def _patch_retinanet_loss(head_cls, class_alphas):
-    from torchvision.ops import sigmoid_focal_loss as _orig_sfl
+    from torchvision.ops import sigmoid_focal_loss
     original_fn = head_cls.compute_loss
     def patched(self, targets, head_outputs, matched_idxs):
         losses = []
@@ -264,11 +249,14 @@ def _patch_retinanet_loss(head_cls, class_alphas):
             gt_target = torch.zeros_like(logits)
             gt_target[foreground, t["labels"][m[foreground]] - 1] = 1.0
             valid = m != self.BETWEEN_THRESHOLDS
-            losses.append(
-                _per_class_focal_loss(
-                    logits[valid], gt_target[valid], alphas=class_alphas.to(logits.device), reduction="sum",
-                ) / max(1, n_fg)
-            )
+            loss_cls = 0.0
+            for c in range(logits.shape[-1]):
+                alpha = class_alphas[c].item() if class_alphas is not None else 0.25
+                loss_cls += sigmoid_focal_loss(
+                    logits[valid, c], gt_target[valid, c],
+                    alpha=alpha, reduction="sum"
+                )
+            losses.append(loss_cls / max(1, n_fg))
         return torch.stack(losses).sum() / max(1, len(targets))
     head_cls.compute_loss = patched.__get__(head_cls, type(head_cls))
 
@@ -388,15 +376,8 @@ def train(cfg):
     class_priors = []
     class_alphas = []
     for ch in range(n_classes):
-        label = ch + 1
-        if label in class_counts:
-            pi = 0.01 * (min_count / max(class_counts[label], 1))
-            alpha = 0.25
-        else:
-            pi = 0.001
-            alpha = 0.25
-        pi = max(0.001, min(0.05, pi))
-        alpha = max(0.25, min(0.90, alpha))
+        pi = 0.01
+        alpha = 0.25
         class_priors.append(pi)
         class_alphas.append(alpha)
     print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB)")
@@ -410,20 +391,24 @@ def train(cfg):
 
     scaled_lr = scale_lr(cfg["training"]["lr"], batch_size)
     backbone_params = []
-    head_params = []
+    pretrained_head_params = []
+    new_head_params = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if "backbone" in name or "body" in name:
+        if "backbone" in name or "body" in name or "fpn" in name:
             backbone_params.append(param)
+        elif "classification_head" in name:
+            new_head_params.append(param)
         else:
-            head_params.append(param)
+            pretrained_head_params.append(param)
 
     if cfg["training"]["optimizer"] == "AdamW":
         optimizer = torch.optim.AdamW(
             [
                 {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": head_params, "lr": scaled_lr},
+                {"params": pretrained_head_params, "lr": scaled_lr * 0.1},
+                {"params": new_head_params, "lr": scaled_lr},
             ],
             weight_decay=cfg["training"]["weight_decay"],
         )
@@ -431,7 +416,8 @@ def train(cfg):
         optimizer = torch.optim.SGD(
             [
                 {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": head_params, "lr": scaled_lr},
+                {"params": pretrained_head_params, "lr": scaled_lr * 0.1},
+                {"params": new_head_params, "lr": scaled_lr},
             ],
             momentum=cfg["training"]["momentum"],
             weight_decay=cfg["training"]["weight_decay"],
