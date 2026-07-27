@@ -66,7 +66,7 @@ DEFAULT_CONFIG = {
         "contrast": 0.1,
         "gamma": 0.0,
         "noise_std": 0.0,
-        "normalize": True,
+        "normalize": False,
     },
     "data": {
         "train_images": "dataset/coco/train",
