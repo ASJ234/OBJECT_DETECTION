@@ -34,6 +34,7 @@ from utils.engine import (
     plot_training_curves, _worker_init_fn, gpu_cleanup,
 )
 from utils.ema import ModelEMA
+from utils.huggingface_hub import push_to_hub
 from explain.gradcam import GradCAM, get_target_layer
 from explain.visualize import overlay_heatmap, draw_detections
 
@@ -64,6 +65,7 @@ DEFAULT_CONFIG = {
         "save_every": 10,
         "seed": 42,
         "resume": None,
+        "push_to_hub": True,
     },
     "augmentation": {
         "hflip_prob": 0.5,
@@ -110,6 +112,12 @@ def parse_args():
     p.add_argument("--results-dir", type=str, default=None)
     p.add_argument("--no-custom-anchors", action="store_true",
                    help="Use default RetinaNet anchors instead of small-lesion anchors")
+    p.add_argument("--no-push-to-hub", action="store_true",
+                   help="Skip pushing model to Hugging Face Hub after training")
+    p.add_argument("--hf-repo-id", type=str, default=None,
+                   help="HF repo ID (e.g. username/model-tbx11k)")
+    p.add_argument("--hf-token", type=str, default=None,
+                   help="HF API token (or use HF_TOKEN env var)")
     args, _ = p.parse_known_args()
     return args
 
@@ -135,6 +143,9 @@ def get_config():
     if args.resume is not None: t["resume"] = args.resume
     if args.results_dir is not None: cfg["results_dir"] = args.results_dir
     if args.no_custom_anchors: m["use_custom_anchors"] = False
+    if args.no_push_to_hub: t["push_to_hub"] = False
+    if args.hf_repo_id is not None: t["hf_repo_id"] = args.hf_repo_id
+    if args.hf_token is not None: t["hf_token"] = args.hf_token
     return cfg
 
 
@@ -822,11 +833,18 @@ def run_xai(cfg):
 # =============================================================================
 def main():
     cfg = get_config()
-    train(cfg)
+    best_map, best_epoch = train(cfg)
     gpu_cleanup()
     evaluate_model(cfg)
     gpu_cleanup()
     run_xai(cfg)
+    if cfg["training"].get("push_to_hub"):
+        push_to_hub(
+            cfg["results_dir"], cfg, best_map, best_epoch,
+            model_type="retinanet",
+            repo_id=cfg["training"].get("hf_repo_id"),
+            token=cfg["training"].get("hf_token"),
+        )
 
 
 if __name__ == "__main__":
