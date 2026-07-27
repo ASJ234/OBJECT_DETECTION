@@ -369,15 +369,21 @@ def train(cfg):
         for ann in train_dataset.coco.loadAnns(ann_ids):
             cid = ann['category_id']
             class_counts[cid] = class_counts.get(cid, 0) + 1
-    min_count = min(class_counts.values())
-    max_count = max(class_counts.values())
+    total = max(sum(class_counts.values()), 1)
     n_classes = cfg["model"]["num_classes"]
     
     class_priors = []
     class_alphas = []
     for ch in range(n_classes):
-        pi = 0.01
-        alpha = 0.25
+        # Relaxed prior so the model doesn't start with such a severe confidence deficit
+        pi = 0.05
+        
+        # Calculate dynamic alpha based on inverse class frequency
+        count = class_counts.get(ch + 1, 1)
+        weight = total / (n_classes * count)
+        # Base focal loss alpha is 0.25, we scale it by the weight and clamp it
+        alpha = min(max(0.1, 0.25 * weight), 0.9)
+        
         class_priors.append(pi)
         class_alphas.append(alpha)
     print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB)")
