@@ -59,7 +59,7 @@ DEFAULT_CONFIG = {
         "weight_decay": 1e-4,
         "momentum": 0.9,
         "clip_norm": 5.0,
-        "warmup_epochs": 3,
+        "warmup_epochs": 0,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
@@ -353,6 +353,13 @@ def train(cfg):
         cfg["data"]["train_images"], cfg["data"]["train_ann"],
         transforms=AugmentedTransform(train=True, cfg=cfg),
     )
+    annotated_ids = [
+        img_id for img_id in train_dataset.ids
+        if len(train_dataset.coco.getAnnIds(imgIds=img_id)) > 0
+    ]
+    train_dataset.ids = annotated_ids
+    print(f"[RetinaNet] Filtered empty images: {len(annotated_ids)}/{len(train_dataset.coco.imgs)} images with annotations")
+
     val_dataset = CocoDetection(
         cfg["data"]["val_images"], cfg["data"]["val_ann"],
         transforms=AugmentedTransform(train=False, cfg=cfg),
@@ -438,16 +445,21 @@ def train(cfg):
 
     epochs = cfg["training"]["epochs"]
     warmup_epochs = cfg["training"]["warmup_epochs"]
-    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=0.1, total_iters=warmup_epochs,
-    )
-    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(epochs - warmup_epochs, 1), eta_min=1e-7,
-    )
-    lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimizer, [warmup_scheduler, cosine_scheduler],
-        milestones=[warmup_epochs],
-    )
+    if warmup_epochs > 0:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.1, total_iters=warmup_epochs,
+        )
+        cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(epochs - warmup_epochs, 1), eta_min=1e-7,
+        )
+        lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, [warmup_scheduler, cosine_scheduler],
+            milestones=[warmup_epochs],
+        )
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=1e-7,
+        )
 
     scaler = None
     metric_tracker = MetricTracker()
