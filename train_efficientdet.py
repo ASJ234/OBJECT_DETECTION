@@ -275,7 +275,8 @@ class EfficientDetWrapper(nn.Module):
         if isinstance(images, (list, tuple)):
             images = torch.stack(list(images))
         with torch.no_grad():
-            detections = self.model(images)
+            out = self.model(images)
+        detections = out[0] if isinstance(out, tuple) else out
         results = []
         for i in range(detections.shape[0]):
             dets = detections[i]
