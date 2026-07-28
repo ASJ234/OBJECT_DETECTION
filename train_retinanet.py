@@ -69,10 +69,10 @@ DEFAULT_CONFIG = {
     },
     "augmentation": {
         "hflip_prob": 0.5,
-        "brightness": 0.1,
-        "contrast": 0.1,
-        "gamma": 0.0,
-        "noise_std": 0.0,
+        "brightness": 0.3,
+        "contrast": 0.3,
+        "gamma": 0.2,
+        "noise_std": 0.05,
         "normalize": False,
     },
     "data": {
