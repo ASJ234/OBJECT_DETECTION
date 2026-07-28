@@ -196,7 +196,7 @@ class AugmentedTransform:
 # Class-Frequency Weighted Sampler
 # =============================================================================
 def get_class_frequency_sampler(dataset):
-    """Sample inversely proportional to class frequency."""
+    """Oversample minority-class (ObsoleteTB) images."""
     class_counts = {1: 0, 2: 0}
     image_labels = []
     
@@ -210,19 +210,24 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    total = sum(class_counts.values()) or 1
-    class_w = {k: total / (v + 1) for k, v in class_counts.items()}
-
+    minority_boost = 3.0
     weights = []
     for labels in image_labels:
         if len(labels) == 0:
-            weights.append(1.0)
+            weights.append(0.0)
         else:
-            w = max(class_w.get(l, 1.0) for l in labels)
+            has_minority = any(l == 2 for l in labels)
+            has_majority = any(l == 1 for l in labels)
+            if has_minority and not has_majority:
+                w = minority_boost
+            elif has_minority and has_majority:
+                w = 1.0 + minority_boost / 2.0
+            else:
+                w = 1.0
             weights.append(w)
 
     print(f"  Class counts: {class_counts}")
-    print(f"  Class weights: { {k: f'{v:.2f}' for k, v in class_w.items()} }")
+    print(f"  ObsoleteTB boost: {minority_boost}x for minority-only images")
     return WeightedRandomSampler(weights, len(weights), replacement=True)
 
 
