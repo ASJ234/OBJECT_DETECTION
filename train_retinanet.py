@@ -168,7 +168,7 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    minority_boost = 3.0
+    minority_boost = 5.0
     weights = []
     for labels in image_labels:
         if len(labels) == 0:
@@ -340,8 +340,8 @@ def train(cfg):
     class_priors = []
     class_alphas = []
     for ch in range(n_classes):
-        # Relaxed prior so the model doesn't start with such a severe confidence deficit
-        pi = 0.05
+        # Frequency-based prior so the model starts with the correct base rate
+        pi = count / total
         
         # Calculate dynamic alpha based on inverse class frequency
         count = class_counts.get(ch + 1, 1)
