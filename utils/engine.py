@@ -180,7 +180,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
             optimizer.zero_grad()
 
         if i % print_freq == 0 and num_batches > 0:
-            lr = optimizer.param_groups[0]['lr']
+            lr = max(g['lr'] for g in optimizer.param_groups)
             elapsed = time.time() - start_time
             parts = [f'Epoch [{epoch}] Step [{i}/{len(data_loader)}]',
                      f'Loss: {losses.item() * gradient_accumulation_steps:.4f}',
