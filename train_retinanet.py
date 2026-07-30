@@ -441,7 +441,7 @@ def train(cfg):
             metric_tracker=metric_tracker,
         )
         lr_scheduler.step()
-        current_lr = optimizer.param_groups[0]["lr"]
+        current_lr = max(g["lr"] for g in optimizer.param_groups)
 
         ema.update(model)
 
