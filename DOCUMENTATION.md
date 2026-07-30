@@ -37,12 +37,12 @@ The image-level tags help understand data distribution but are **not** used as t
 
 ## Architectures
 
-| # | Model | Type | Framework | Batch | Epochs | Optimizer | LR |
-|---|-------|------|-----------|-------|--------|-----------|-----|
-| 1 | **FCOS** | Anchor-free one-stage | TorchVision | 16 | 50 | AdamW | 0.01 (cosine) |
-| 2 | **EfficientDet-D2** | BiFPN multi-scale | `effdet` + `timm` | 16 | 50 | AdamW | 5e-3 (cosine) |
-| 3 | **RetinaNet** | One-stage focal loss | TorchVision | 16 | 50 | AdamW | 0.01 (cosine) |
-| 4 | **DETR** | Transformer-based (end-to-end) | HuggingFace | 8 (eff. 32) | 50 | AdamW | 1e-4 (cosine) |
+| # | Model | Type | Framework | Batch | Epochs | Optimizer | Head LR | Backbone LR |
+|   |-------|------|-----------|-------|--------|-----------|---------|-------------|
+| 1 | **FCOS** | Anchor-free one-stage | TorchVision | 8 | 50 | AdamW | 5e-4 (cosine) | 1e-5 |
+| 2 | **RetinaNet** | One-stage focal loss | TorchVision | 8 | 50 | AdamW | 5e-4 (cosine) | 1e-5 |
+| 3 | **EfficientDet-D2** | BiFPN multi-scale | `effdet` + `timm` | 4 | 50 | AdamW | 5e-3 (cosine) | 1e-4 |
+| 4 | **DETR** | Transformer-based (end-to-end) | HuggingFace | 4 | 50 | AdamW | 5e-4 (cosine) | 1e-5 |
 
 ## Project Structure
 
@@ -54,7 +54,10 @@ tb-detection/
 ├── utils/
 │   ├── __init__.py
 │   ├── coco_dataset.py         # PyTorch Dataset for COCO-format data
-│   └── engine.py               # Training loop, eval, confusion matrix
+│   ├── engine.py               # Training loop, eval, confusion matrix
+│   ├── transforms.py           # Shared augmentation transforms (rotation, translation, scale, etc.)
+│   ├── ema.py                  # Exponential Moving Average
+│   └── huggingface_hub.py      # HF Hub push integration
 ├── explain/
 │   ├── __init__.py
 │   ├── gradcam.py              # Grad-CAM for CNN-based models
@@ -64,6 +67,7 @@ tb-detection/
 ├── train_efficientdet.py       # EfficientDet-D2 training pipeline
 ├── train_retinanet.py          # RetinaNet training pipeline
 ├── train_detr.py               # DETR training pipeline
+├── run_all.py                  # Sequential runner for all 4 pipelines
 ├── run_kaggle.ipynb            # Kaggle notebook entry point
 └── DOCUMENTATION.md            # This file
 ```
@@ -154,12 +158,12 @@ results/
 
 | Finding | Decision |
 |---------|----------|
-| 6.8% of images have boxes | Oversample positives 4× in dataloader |
-| 4:1 ActiveTB to ObsoleteTB ratio | Monitor per-class AP, no special weighting (focal loss handles it) |
+| 91% of images have no boxes | Keep in dataset with sampler weight 0.05 — model learns background suppression |
+| 4:1 ActiveTB to ObsoleteTB ratio | Frequency-based class priors + focal loss α=0.156/0.633 + 5× minority oversampling |
 | 95.4% of boxes in top image half | Natural for chest X-rays — no intervention needed |
 | Mean aspect ratio 0.97 (roughly square) | Default anchor boxes are appropriate |
 | Test set has no ground-truth boxes | Inference-only on test; evaluation on val set |
-| `healthy`/`sick_but_non-tb` tags have zero boxes | Include as negative samples to reduce false positives |
+| `healthy`/`sick_but_non-tb` tags have zero boxes | Include as negative samples (weight 0.05 via sampler) to reduce false positives |
 | Image-level tags (5 types) exist alongside bounding boxes | Tags are informational only — not used as training classes |
 
 ## XAI Methods
@@ -176,3 +180,71 @@ Each model generates explanations for 5 test samples, saved to `results/{model}/
 ## Kaggle
 
 Upload to Kaggle and run `run_kaggle.ipynb` for the full pipeline in one notebook. Ensure the dataset is available at the standard Kaggle input path or adjust paths accordingly.
+
+## Training Optimizations
+
+The following fixes were applied after the initial training run showed mAP stuck at ~0 (epochs 1–14) due to several issues:
+
+### 1. Keep Negative Samples (Critical for mAP)
+
+**Problem**: Filtering out images without annotations (91% of training data) meant validation only evaluated on positive images, making mAP meaningless.
+
+**Fix**: Keep all 6600 images in the dataset. The `WeightedRandomSampler` gives empty images a small probability (0.05) of being sampled, teaching the model to suppress false positives while still focusing on annotated images.
+
+### 2. Frequency-Based Class Priors
+
+**Problem**: Bias initialization used hardcoded prior of 0.05 for both classes, forcing the model to learn the correct base rate (80%/20%) from scratch.
+
+**Fix**: Priors are now computed from actual class frequencies — `pi = count / total`. For FCOS/RetinaNet: ActiveTB = 0.80 (bias = +1.39), ObsoleteTB = 0.20 (bias = -1.39).
+
+### 3. Higher Head Learning Rate
+
+**Problem**: The randomly-initialized classification head uses the same LR as the pretrained backbone, converging too slowly.
+
+**Fix**: Head LR = 5× base LR (5e-4), backbone LR = 0.01× base LR (1e-5). This 500:1 ratio lets the head learn quickly while preserving pretrained features.
+
+### 4. Minority Oversampling Boost
+
+**Problem**: 4:1 class imbalance (724 ActiveTB vs 178 ObsoleteTB boxes) pushed predictions toward the majority class.
+
+**Fix**: Minority-only images get 5× sampling weight, mixed-class images get 3.5×, majority-only images get 1×.
+
+### 5. Increased Gradient Clipping Threshold
+
+**Problem**: `clip_norm = 5.0` discarded ~38% of gradient signal (grad norm ~8).
+
+**Fix**: `clip_norm = 10.0` allows more gradient information through during early training.
+
+### 6. Geometric Augmentations
+
+**Problem**: Static training data, no spatial diversity.
+
+**Fix**: Added rotation (±10°), translation (±10%), and scaling (±30%) via shared `utils/transforms.SharedAugmentedTransform`, with filtering of degenerate (zero-area) boxes after transforms.
+
+### 7. Fixed LR Logging
+
+**Problem**: Step logs showed `LR: 1e-5` (backbone LR), misleading users about the actual training LR (5e-4 for head).
+
+**Fix**: Both per-step and per-epoch logs now show `max(g["lr"] for g in optimizer.param_groups)`, reflecting the effective head LR.
+
+### 8. Environment Compatibility
+
+| Issue | Fix |
+|-------|-----|
+| Shared memory (SHM) full on mlbox-gpu1 | `num_workers: 0` default in all configs |
+| GPU OOM cascade in `run_all.py` | Added `torch.cuda.empty_cache()` between runs, reduced batch sizes to 8/4 |
+| Missing `transformers` for DETR | Added dependency check in `run_all.py` |
+
+### Parameter Summary
+
+| Parameter | Before | After |
+|-----------|--------|-------|
+| Empty image filter | Removed from dataset | Kept with sampler weight 0.05 |
+| Class priors | Hardcoded 0.05 | Frequency-based (0.80/0.20) |
+| Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
+| Minority boost | 3× | 5× |
+| Gradient clip | 5.0 | 10.0 |
+| Batch size (FCOS/RetinaNet) | 16 | 8 |
+| Batch size (EfficientDet/DETR) | 16/8 | 4 |
+| num_workers | 2 | 0 |
+| Transforms | Per-file duplicates | Shared `SharedAugmentedTransform` with rotation/translation/scale |
