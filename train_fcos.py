@@ -330,11 +330,11 @@ def train(cfg):
     class_alphas = []
     label_names = {1: "ActiveTB", 2: "ObsoleteTB"}
     for ch in range(n_classes):
+        # Calculate dynamic alpha based on inverse class frequency
+        count = class_counts.get(ch + 1, 1)
         # Frequency-based prior so the model starts with the correct base rate
         pi = count / total
         
-        # Calculate dynamic alpha based on inverse class frequency
-        count = class_counts.get(ch + 1, 1)
         weight = total / (n_classes * count)
         # Base focal loss alpha is 0.25, we scale it by the weight and clamp it
         alpha = min(max(0.1, 0.25 * weight), 0.9)
