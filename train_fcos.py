@@ -53,7 +53,7 @@ DEFAULT_CONFIG = {
         "optimizer": "AdamW",
         "weight_decay": 1e-4,
         "momentum": 0.9,
-        "clip_norm": 5.0,
+        "clip_norm": 10.0,
         "warmup_epochs": 0,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
@@ -163,7 +163,7 @@ def get_class_frequency_sampler(dataset):
     weights = []
     for labels in image_labels:
         if len(labels) == 0:
-            weights.append(0.0)
+            weights.append(0.05)  # small chance to learn background suppression
         else:
             has_minority = any(l == 2 for l in labels)
             has_majority = any(l == 1 for l in labels)
@@ -381,8 +381,8 @@ def train(cfg):
     if cfg["training"]["optimizer"] == "AdamW":
         optimizer = torch.optim.AdamW(
             [
-                {"params": backbone_params, "lr": lr * 0.1},
-                {"params": head_params, "lr": lr},
+                {"params": backbone_params, "lr": lr * 0.01},
+                {"params": head_params, "lr": lr * 5},
             ],
             weight_decay=cfg["training"]["weight_decay"],
         )
