@@ -19,7 +19,6 @@ import numpy as np
 import wandb
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from transformers import DetrForObjectDetection
-import torchvision.transforms.functional as TF
 
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +33,7 @@ from utils.engine import (
 )
 from utils.ema import ModelEMA
 from utils.huggingface_hub import push_to_hub
+from utils.transforms import SharedAugmentedTransform
 from explain.detr_attention import DETRAttentionExtractor
 CLASS_NAMES = {0: "Background", 1: "ActiveTuberculosis", 2: "ObsoletePulmonaryTuberculosis"}
 CLASS_COLORS = {1: (255, 0, 0), 2: (0, 200, 255)}
@@ -146,54 +146,6 @@ def get_config():
 
 
 # =============================================================================
-# Data Augmentation Transforms
-# =============================================================================
-class AugmentedTransform:
-    def __init__(self, train=True, cfg=None):
-        self.train = train
-        aug = (cfg or {}).get("augmentation", {})
-        self.hflip_prob = aug.get("hflip_prob", 0.5)
-        self.brightness = aug.get("brightness", 0.3)
-        self.contrast = aug.get("contrast", 0.3)
-        self.gamma_range = aug.get("gamma", 0.2)
-        self.noise_std = aug.get("noise_std", 0.05)
-        self.normalize = aug.get("normalize", True)
-
-    def __call__(self, image, target):
-        image = TF.to_tensor(image)
-
-        if self.train:
-            if torch.rand(1).item() < self.hflip_prob:
-                image = TF.hflip(image)
-                if len(target["boxes"]) > 0:
-                    boxes = target["boxes"].clone()
-                    w = image.shape[-1]
-                    boxes[:, [0, 2]] = w - boxes[:, [2, 0]]
-                    target["boxes"] = boxes
-
-            if torch.rand(1).item() < 0.5:
-                factor = 1.0 + (torch.rand(1).item() - 0.5) * 2 * self.brightness
-                image = TF.adjust_brightness(image, factor)
-
-            if torch.rand(1).item() < 0.5:
-                factor = 1.0 + (torch.rand(1).item() - 0.5) * 2 * self.contrast
-                image = TF.adjust_contrast(image, factor)
-
-            if torch.rand(1).item() < 0.3:
-                g = 1.0 + (torch.rand(1).item() - 0.5) * 2 * self.gamma_range
-                image = image.clamp(min=1e-6).pow(g)
-
-            if torch.rand(1).item() < 0.3:
-                image = (image + torch.randn_like(image) * self.noise_std).clamp(0, 1)
-
-        image = image.clamp(0, 1)
-
-        if self.normalize:
-            image = TF.normalize(image, IMAGENET_MEAN, IMAGENET_STD)
-
-        return image, target
-
-
 # =============================================================================
 # HuggingFace DETR Wrapper — adapts HF DETR to torchvision-style API
 # =============================================================================
@@ -415,19 +367,13 @@ def train(cfg):
 
     train_dataset = CocoDetection(
         cfg["data"]["train_images"], cfg["data"]["train_ann"],
-        transforms=AugmentedTransform(train=True, cfg=cfg),
+        transforms=SharedAugmentedTransform(train=True, cfg=cfg),
     )
-    # Filter out images with no annotations
-    annotated_ids = [
-        img_id for img_id in train_dataset.ids
-        if len(train_dataset.coco.getAnnIds(imgIds=img_id)) > 0
-    ]
-    train_dataset.ids = annotated_ids
-    print(f"[DETR] Filtered empty images: {len(annotated_ids)}/{len(train_dataset.coco.imgs)} images with annotations")
+    print(f"[DETR] Training on {len(train_dataset)} images ({len(train_dataset.coco.getAnnIds())} total annotations)")
 
     val_dataset = CocoDetection(
         cfg["data"]["val_images"], cfg["data"]["val_ann"],
-        transforms=AugmentedTransform(train=False, cfg=cfg),
+        transforms=SharedAugmentedTransform(train=False, cfg=cfg),
     )
 
     batch_size = cfg["training"]["batch_size"]
@@ -612,7 +558,7 @@ def evaluate_model(cfg):
 
     val_dataset = CocoDetection(
         cfg["data"]["val_images"], cfg["data"]["val_ann"],
-        transforms=AugmentedTransform(train=False, cfg=cfg),
+        transforms=SharedAugmentedTransform(train=False, cfg=cfg),
     )
     val_loader = DataLoader(
         val_dataset, batch_size=cfg["training"]["batch_size"],
@@ -686,7 +632,7 @@ def evaluate_model(cfg):
         test_dataset = CocoDetection(
             cfg["data"].get("test_images", "dataset/coco/test"),
             test_ann,
-            transforms=AugmentedTransform(train=False, cfg=cfg),
+            transforms=SharedAugmentedTransform(train=False, cfg=cfg),
         )
         test_loader = DataLoader(
             test_dataset, batch_size=cfg["training"]["batch_size"],
@@ -736,7 +682,7 @@ def run_xai(cfg):
 
     xai_dataset = CocoDetection(
         xai_img_dir, xai_ann,
-        transforms=AugmentedTransform(train=False, cfg=cfg),
+        transforms=SharedAugmentedTransform(train=False, cfg=cfg),
     )
     loader = DataLoader(
         xai_dataset, batch_size=1, shuffle=False,
