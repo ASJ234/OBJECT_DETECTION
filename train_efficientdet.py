@@ -63,7 +63,7 @@ DEFAULT_CONFIG = {
     },
     "training": {
         "epochs": 50,
-        "batch_size": 16,
+        "batch_size": 4,
         "lr": 5e-3,
         "lr_backbone": 5e-4,
         "weight_decay": 1e-4,

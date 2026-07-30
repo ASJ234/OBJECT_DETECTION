@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
     },
     "training": {
         "epochs": 50,
-        "batch_size": 8,
+        "batch_size": 4,
         "lr_backbone": 1e-5,
         "lr_transformer": 1e-4,
         "lr_head": 1e-4,

@@ -48,7 +48,7 @@ DEFAULT_CONFIG = {
     },
     "training": {
         "epochs": 50,
-        "batch_size": 16,
+        "batch_size": 8,
         "lr": 1e-4,
         "optimizer": "AdamW",
         "weight_decay": 1e-4,
