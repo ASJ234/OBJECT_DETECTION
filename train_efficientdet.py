@@ -91,7 +91,7 @@ DEFAULT_CONFIG = {
         "val_ann": "dataset/coco/val.json",
         "test_images": "dataset/coco/test",
         "test_ann": "dataset/coco/test.json",
-        "num_workers": 2,
+        "num_workers": 0,
     },
     "results_dir": "results/efficientdet",
 }
