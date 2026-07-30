@@ -95,6 +95,20 @@ class SharedAugmentedTransform:
         self.scale_range = aug.get("scale_range", 0.3)
         self.scale_prob = aug.get("scale_prob", 0.3)
 
+    def _filter_valid_boxes(self, target):
+        """Remove boxes with zero or negative width/height after geometric transforms."""
+        if len(target["boxes"]) == 0:
+            return target
+        ws = target["boxes"][:, 2] - target["boxes"][:, 0]
+        hs = target["boxes"][:, 3] - target["boxes"][:, 1]
+        valid = (ws > 0) & (hs > 0)
+        if not valid.all():
+            target["boxes"] = target["boxes"][valid]
+            target["labels"] = target["labels"][valid]
+            if "area" in target:
+                target["area"] = target["area"][valid]
+        return target
+
     def __call__(self, image, target):
         image = TF.to_tensor(image)
         _, h, w = image.shape
@@ -122,6 +136,8 @@ class SharedAugmentedTransform:
                 s = 1.0 + (torch.rand(1).item() - 0.5) * 2 * self.scale_range
                 image = TF.affine(image, angle=0, translate=(0, 0), scale=s, shear=0, fill=0)
                 target["boxes"] = _scale_boxes(target["boxes"], s, s, w, h)
+
+            target = self._filter_valid_boxes(target)
 
             if torch.rand(1).item() < 0.5:
                 factor = 1.0 + (torch.rand(1).item() - 0.5) * 2 * self.brightness
