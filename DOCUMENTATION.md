@@ -241,12 +241,18 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Fix**: Raised `image_min_size` to 1024 (max_size 1536) in the FCOS and RetinaNet configs so the class head sees more discriminative detail; extended training to 75 epochs to stretch the cosine-LR tail. `--min-size`/`--max-size` CLI flags override per-run. Eval and XAI inherit the same resolution from the config.
 
+### 10. RetinaNet-Specific Prior (pi=0.01 → 0.05)
+
+**Problem**: RetinaNet produced **zero predictions through 14 epochs** while FCOS fired from epoch 1. Diagnosis: `build_retinanet` replaces the *entire* classification head (3 random conv layers + final conv), whereas FCOS keeps pretrained head convs and only swaps the final conv. With the neutral prior pi=0.01, background anchors sit at p≈0.01 where focal's easy-negative downweighting is negligible ((0.99)²≈0.98), so background dominates and the random head is pinned at the prior — it can't lift any anchor above the 0.05 firing threshold. Verified locally: 12 optimizer steps at pi=0.01 → 7 detections at scores 0.05–0.06; at pi=0.05 → 433 detections at scores 0.25–0.34.
+
+**Fix**: RetinaNet uses prior pi=0.05 (logit -2.94, the firing threshold) for both classes — still symmetric/neutral. At p=0.05, background anchors become easy negatives that focal crushes (0.05²≈0.0025), letting the foreground signal dominate and the head fire immediately. FCOS keeps pi=0.01.
+
 ### Parameter Summary
 
 | Parameter | Before | After |
 |-----------|--------|-------|
 | Empty image filter | Removed from dataset | Kept with sampler weight 0.05 |
-| Class priors | Frequency-based (0.80/0.20) | Neutral (pi=0.01, logit -4.60 all classes) |
+| Class priors | Frequency-based (0.80/0.20) | Neutral, symmetric: FCOS pi=0.01 (logit -4.60), RetinaNet pi=0.05 (logit -2.94) |
 | Minority focal alpha | 0.633 → 0.75 | 0.25 (symmetric, sampler balances classes) |
 | Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
 | Minority sampling | 3× → 5× → 8× boost → per-group cap | Majority undersampled: ActiveTB capped at 200 anns, excess excluded (weight 0); negatives weight 0.05 |

@@ -363,9 +363,9 @@ def train(cfg):
 
     n_classes = cfg["model"]["num_classes"]
     
-    class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
+    class_priors = [0.05] * n_classes  # neutral bias: object prior for every class
     class_alphas = [0.25] * n_classes  # symmetric focal alpha: undersampler already balances class counts
-    print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
+    print(f"  Neutral bias init: pi=0.05 for all classes (logit=-2.94)")
     print(f"  Focal loss alphas: symmetric 0.25 for all classes (counts {class_counts} balanced by sampler)")
 
     class_alphas_tensor = torch.tensor(class_alphas)
