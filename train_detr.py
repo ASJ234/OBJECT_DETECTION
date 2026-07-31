@@ -326,7 +326,7 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    minority_boost = 5.0
+    minority_boost = 8.0
     weights = []
     for labels in image_labels:
         if len(labels) == 0:

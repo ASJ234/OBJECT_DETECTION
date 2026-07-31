@@ -168,7 +168,7 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    minority_boost = 5.0
+    minority_boost = 8.0
     weights = []
     for labels in image_labels:
         if len(labels) == 0:
@@ -337,21 +337,20 @@ def train(cfg):
 
     n_classes = cfg["model"]["num_classes"]
     
-    class_priors = []
+    class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
     class_alphas = []
+    MINORITY_ALPHA = 0.75
     for ch in range(n_classes):
         # Calculate dynamic alpha based on inverse class frequency
         count = class_counts.get(ch + 1, 1)
-        # Frequency-based prior so the model starts with the correct base rate
-        pi = count / total
-        
         weight = total / (n_classes * count)
-        # Base focal loss alpha is 0.25, we scale it by the weight and clamp it
+        # Base focal loss alpha is 0.25, scaled by the weight and clamped.
+        # The minority class gets a fixed strong alpha to resist background gradient mass.
         alpha = min(max(0.1, 0.25 * weight), 0.9)
-        
-        class_priors.append(pi)
+        if count < total / n_classes:
+            alpha = MINORITY_ALPHA
         class_alphas.append(alpha)
-    print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB)")
+    print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
     print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB) based on counts {class_counts}")
 
     class_alphas_tensor = torch.tensor(class_alphas)

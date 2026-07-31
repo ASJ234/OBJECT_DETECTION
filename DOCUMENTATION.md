@@ -191,11 +191,11 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Fix**: Keep all 6600 images in the dataset. The `WeightedRandomSampler` gives empty images a small probability (0.05) of being sampled, teaching the model to suppress false positives while still focusing on annotated images.
 
-### 2. Frequency-Based Class Priors
+### 2. Class Prior and Alpha for the Classification Head
 
-**Problem**: Bias initialization used hardcoded prior of 0.05 for both classes, forcing the model to learn the correct base rate (80%/20%) from scratch.
+**Problem**: Two failure modes. First, a hardcoded prior of 0.05 for both classes forced the model to learn the base rate from scratch. Then, per-class frequency priors (ActiveTB +1.39, ObsoleteTB -1.39) created a 2.8-logit gap — the minority head started in a "danger zone" and background gradient mass (5,400 background anchors vs 1-2 positive per image) drowned it below the 0.05 firing threshold, producing **zero** ObsoleteTB detections after 29 epochs.
 
-**Fix**: Priors are now computed from actual class frequencies — `pi = count / total`. For FCOS/RetinaNet: ActiveTB = 0.80 (bias = +1.39), ObsoleteTB = 0.20 (bias = -1.39).
+**Fix**: Neutral bias init — `pi = 0.01` (logit = -4.60) for every class, so no class starts ahead of or behind the other. Class balance comes from focal-loss alpha + oversampling instead of the bias. Minority (ObsoleteTB) alpha raised to 0.75 (FCOS/RetinaNet per-class; EfficientDet scalar `config.alpha`), weakening background pressure on its channel ((1-alpha) from 0.367 → 0.25).
 
 ### 3. Higher Head Learning Rate
 
@@ -207,7 +207,7 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Problem**: 4:1 class imbalance (724 ActiveTB vs 178 ObsoleteTB boxes) pushed predictions toward the majority class.
 
-**Fix**: Minority-only images get 5× sampling weight, mixed-class images get 3.5×, majority-only images get 1×.
+**Fix**: Minority-only images get 8× sampling weight, mixed-class images get 5×, majority-only images get 1×.
 
 ### 5. Increased Gradient Clipping Threshold
 
@@ -240,9 +240,10 @@ The following fixes were applied after the initial training run showed mAP stuck
 | Parameter | Before | After |
 |-----------|--------|-------|
 | Empty image filter | Removed from dataset | Kept with sampler weight 0.05 |
-| Class priors | Hardcoded 0.05 | Frequency-based (0.80/0.20) |
+| Class priors | Frequency-based (0.80/0.20) | Neutral (pi=0.01, logit -4.60 all classes) |
+| Minority focal alpha | 0.633 | 0.75 (scalar 0.75 for EfficientDet) |
 | Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
-| Minority boost | 3× | 5× |
+| Minority boost | 3× → 5× | 8× |
 | Gradient clip | 5.0 | 10.0 |
 | Batch size (FCOS/RetinaNet) | 16 | 8 |
 | Batch size (EfficientDet/DETR) | 16/8 | 4 |

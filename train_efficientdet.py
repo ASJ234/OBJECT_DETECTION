@@ -297,7 +297,7 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    minority_boost = 5.0
+    minority_boost = 8.0
     weights = []
     for labels in image_labels:
         if len(labels) == 0:
@@ -377,23 +377,23 @@ def train(cfg):
 
     n_classes = cfg["model"]["num_classes"]
 
-    class_priors = []
+    class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
     class_alphas = []
     for ch in range(n_classes):
-        # Calculate dynamic alpha based on inverse class frequency
         count = class_counts.get(ch + 1, 1)
-        # Frequency-based prior so the model starts with the correct base rate
-        pi = count / total
-        
         weight = total / (n_classes * count)
-        # Base focal loss alpha is 0.25, we scale it by the weight and clamp it
+        # Base focal loss alpha is 0.25, scaled by the weight and clamped.
+        # effdet uses a scalar alpha, so per-class values are informational only;
+        # the actual scalar is set on config below.
         alpha = min(max(0.1, 0.25 * weight), 0.9)
-        
-        class_priors.append(pi)
+        if count < total / n_classes:
+            alpha = 0.75
         class_alphas.append(alpha)
-    print(f"  Class priors: ch0={class_priors[0]:.4f} (ActiveTB), ch1={class_priors[1]:.4f} (ObsoleteTB), ch2={class_priors[2]:.4f} (unused)")
+    print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
 
     raw_model, use_pretrained = build_efficientdet(cfg, class_priors=class_priors)
+    raw_model.config.alpha = 0.75  # weaken background gradient mass (default was 0.25)
+    print(f"  Focal loss scalar alpha: {raw_model.config.alpha:.2f}")
     raw_model.to(device)
     bench_train = DetBenchTrain(raw_model).to(device)
 
