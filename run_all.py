@@ -4,10 +4,8 @@ import time
 
 
 PIPELINES = [
-    ("FCOS", "train_fcos.py", ["--batch-size", "8"]),
-    ("RetinaNet", "train_retinanet.py", ["--batch-size", "8"]),
-    ("EfficientDet", "train_efficientdet.py", ["--batch-size", "4"]),
-    ("DETR", "train_detr.py", ["--batch-size", "4"]),
+    ("FCOS", "train_fcos.py", ["--batch-size", "16"]),
+    ("RetinaNet", "train_retinanet.py", ["--batch-size", "16"]),
 ]
 
 
@@ -19,22 +17,10 @@ def _free_gpu_memory():
     )
 
 
-def _check_deps():
-    """Check DETR dependency."""
-    result = subprocess.run(
-        [sys.executable, "-c", "import transformers"],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        print("[WARN] DETR requires 'transformers' — install with: pip install transformers")
-
-
 def main():
     python = sys.executable
     total = len(PIPELINES)
     failed = []
-
-    _check_deps()
 
     for i, (name, script, extra_args) in enumerate(PIPELINES, 1):
         _free_gpu_memory()
@@ -62,9 +48,9 @@ def main():
         print(f"  Completed: {total - len(failed)}/{total}")
         print(f"  Failed:    {', '.join(failed)}")
     else:
-        print("  All 4 pipelines complete!")
+        print("  All 2 pipelines complete!")
     print(f"{'='*60}")
-    print("\nResults saved to results/{fcos,retinanet,efficientdet,detr}/")
+    print("\nResults saved to results/{fcos,retinanet}/")
 
 
 if __name__ == "__main__":
