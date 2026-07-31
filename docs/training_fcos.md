@@ -45,7 +45,7 @@
 
 ### 5. Loss Function
 - **Focal Loss**: For classification (handles class imbalance)
-  - Alpha: Dynamic per-class (ObsoleteTB gets higher alpha)
+  - Alpha: Symmetric 0.25 for all classes (undersampler balances class counts)
   - Gamma: 2.0 (default)
 - **GIoU Loss**: For box regression
 - **Centerness Loss**: Binary cross-entropy for centerness prediction

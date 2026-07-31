@@ -46,7 +46,7 @@
 
 ### 5. Loss Function
 - **Focal Loss**: For classification (handles class imbalance)
-  - Alpha: Dynamic per-class (ObsoleteTB gets higher alpha)
+  - Alpha: Scalar 0.25 (symmetric, undersampler balances class counts)
   - Gamma: 1.5 (default)
 - **Huber Loss**: For box regression
 - **Anchor Assignment**: Based on IoU with ground truth

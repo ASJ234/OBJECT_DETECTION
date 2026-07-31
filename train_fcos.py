@@ -333,26 +333,13 @@ def train(cfg):
         for ann in train_dataset.coco.loadAnns(ann_ids):
             cid = ann['category_id']
             class_counts[cid] = class_counts.get(cid, 0) + 1
-    total = max(sum(class_counts.values()), 1)
 
     n_classes = cfg["model"]["num_classes"]
     
     class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
-    class_alphas = []
-    label_names = {1: "ActiveTB", 2: "ObsoleteTB"}
-    MINORITY_ALPHA = 0.75
-    for ch in range(n_classes):
-        # Calculate dynamic alpha based on inverse class frequency
-        count = class_counts.get(ch + 1, 1)
-        weight = total / (n_classes * count)
-        # Base focal loss alpha is 0.25, scaled by the weight and clamped.
-        # The minority class gets a fixed strong alpha to resist background gradient mass.
-        alpha = min(max(0.1, 0.25 * weight), 0.9)
-        if count < total / n_classes:
-            alpha = MINORITY_ALPHA
-        class_alphas.append(alpha)
+    class_alphas = [0.25] * n_classes  # symmetric focal alpha: undersampler already balances class counts
     print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
-    print(f"  Focal loss alphas: ch0={class_alphas[0]:.3f} (ActiveTB), ch1={class_alphas[1]:.3f} (ObsoleteTB) based on counts {class_counts}")
+    print(f"  Focal loss alphas: symmetric 0.25 for all classes (counts {class_counts} balanced by sampler)")
 
     class_alphas_tensor = torch.tensor(class_alphas)
 

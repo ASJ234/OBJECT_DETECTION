@@ -379,32 +379,13 @@ def train(cfg):
         pin_memory=True, worker_init_fn=_worker_init_fn,
     )
 
-    class_counts = {}
-    for idx in range(len(train_dataset)):
-        ann_ids = train_dataset.coco.getAnnIds(imgIds=train_dataset.ids[idx])
-        for ann in train_dataset.coco.loadAnns(ann_ids):
-            cid = ann['category_id']
-            class_counts[cid] = class_counts.get(cid, 0) + 1
-    total = max(sum(class_counts.values()), 1)
-
     n_classes = cfg["model"]["num_classes"]
 
     class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
-    class_alphas = []
-    for ch in range(n_classes):
-        count = class_counts.get(ch + 1, 1)
-        weight = total / (n_classes * count)
-        # Base focal loss alpha is 0.25, scaled by the weight and clamped.
-        # effdet uses a scalar alpha, so per-class values are informational only;
-        # the actual scalar is set on config below.
-        alpha = min(max(0.1, 0.25 * weight), 0.9)
-        if count < total / n_classes:
-            alpha = 0.75
-        class_alphas.append(alpha)
     print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
 
     raw_model, use_pretrained = build_efficientdet(cfg, class_priors=class_priors)
-    raw_model.config.alpha = 0.75  # weaken background gradient mass (default was 0.25)
+    raw_model.config.alpha = 0.25  # symmetric focal alpha: undersampler balances class counts
     print(f"  Focal loss scalar alpha: {raw_model.config.alpha:.2f}")
     raw_model.to(device)
     bench_train = DetBenchTrain(raw_model).to(device)

@@ -195,7 +195,7 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Problem**: Two failure modes. First, a hardcoded prior of 0.05 for both classes forced the model to learn the base rate from scratch. Then, per-class frequency priors (ActiveTB +1.39, ObsoleteTB -1.39) created a 2.8-logit gap — the minority head started in a "danger zone" and background gradient mass (5,400 background anchors vs 1-2 positive per image) drowned it below the 0.05 firing threshold, producing **zero** ObsoleteTB detections after 29 epochs.
 
-**Fix**: Neutral bias init — `pi = 0.01` (logit = -4.60) for every class, so no class starts ahead of or behind the other. Class balance comes from focal-loss alpha + the majority undersampler (Section 4) instead of the bias. Minority (ObsoleteTB) alpha raised to 0.75 (FCOS/RetinaNet per-class; EfficientDet scalar `config.alpha`), weakening background pressure on its channel ((1-alpha) from 0.367 → 0.25).
+**Fix**: Neutral bias init — `pi = 0.01` (logit = -4.60) for every class, so no class starts ahead of or behind the other. Class balance comes entirely from the majority undersampler (Section 4) instead of the bias or loss weights. Focal-loss alpha is **symmetric (0.25 for all classes)** — an earlier 0.75 minority alpha was removed after run 3 showed it gave ObsoleteTB a 4.8:1 gradient advantage (0.156 vs 0.75) that starved the ActiveTB head (ActiveTB AR 0.000, ObsoleteTB AR 0.220 at E6).
 
 ### 3. Higher Head Learning Rate
 
@@ -241,7 +241,7 @@ The following fixes were applied after the initial training run showed mAP stuck
 |-----------|--------|-------|
 | Empty image filter | Removed from dataset | Kept with sampler weight 0.05 |
 | Class priors | Frequency-based (0.80/0.20) | Neutral (pi=0.01, logit -4.60 all classes) |
-| Minority focal alpha | 0.633 | 0.75 (scalar 0.75 for EfficientDet) |
+| Minority focal alpha | 0.633 → 0.75 | 0.25 (symmetric, sampler balances classes) |
 | Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
 | Minority sampling | 3× → 5× → 8× boost → per-group cap | Majority undersampled: ActiveTB capped at 200 anns, excess excluded (weight 0); negatives weight 0.05 |
 | Gradient clip | 5.0 | 10.0 |
