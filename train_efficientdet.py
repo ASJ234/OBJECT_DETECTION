@@ -440,8 +440,8 @@ def train(cfg):
             cfg["training"]["resume"], raw_model, optimizer, scaler, lr_scheduler,
         )
         start_epoch = ckpt.get("epoch", 0) + 1
-        best_map = ckpt.get("metrics", {}).get("best_map", 0.0)
-        best_epoch = ckpt.get("metrics", {}).get("best_epoch", -1)
+        best_map = ckpt.get("metrics", {}).get("best_map", ckpt.get("best_map", 0.0))
+        best_epoch = ckpt.get("metrics", {}).get("best_epoch", ckpt.get("best_epoch", -1))
         if "ema_state_dict" in ckpt:
             ema.load_state_dict(ckpt["ema_state_dict"])
         print(

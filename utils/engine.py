@@ -96,7 +96,17 @@ def save_checkpoint(model, optimizer, epoch, metrics, path,
     if extra is not None:
         state.update(extra)
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    torch.save(state, path)
+    tmp_path = path + '.tmp'
+    try:
+        torch.save(state, tmp_path)
+        os.replace(tmp_path, path)
+    except (OSError, RuntimeError) as e:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        logger.warning(f'Checkpoint save failed for {path}: {e} (check disk space); training continues')
+        return
     logger.info(f'Checkpoint saved: {path}')
 
 

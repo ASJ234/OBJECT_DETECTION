@@ -424,8 +424,8 @@ def train(cfg):
             cfg["training"]["resume"], model, optimizer, scaler, lr_scheduler,
         )
         start_epoch = ckpt.get("epoch", 0) + 1
-        best_map = ckpt.get("metrics", {}).get("best_map", 0.0)
-        best_epoch = ckpt.get("metrics", {}).get("best_epoch", -1)
+        best_map = ckpt.get("metrics", {}).get("best_map", ckpt.get("best_map", 0.0))
+        best_epoch = ckpt.get("metrics", {}).get("best_epoch", ckpt.get("best_epoch", -1))
         if "ema_state_dict" in ckpt:
             ema.load_state_dict(ckpt["ema_state_dict"])
         print(
@@ -477,10 +477,13 @@ def train(cfg):
                     scaler=scaler, scheduler=lr_scheduler,
                     extra={"ema_state_dict": ema.state_dict()},
                 )
-                torch.save(
-                    ema.state_dict(),
-                    f"{results_dir}/weights/ema_model.pth",
-                )
+                try:
+                    torch.save(
+                        ema.state_dict(),
+                        f"{results_dir}/weights/ema_model.pth",
+                    )
+                except (OSError, RuntimeError) as e:
+                    print(f"  [WARN] EMA save failed: {e} (check disk space)")
                 print(f"  New best model! mAP={best_map:.4f} (epoch {epoch})")
             else:
                 patience_counter += 1
