@@ -203,11 +203,11 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Fix**: Head LR = 5× base LR (5e-4), backbone LR = 0.01× base LR (1e-5). This 500:1 ratio lets the head learn quickly while preserving pretrained features.
 
-### 4. Minority Oversampling Boost
+### 4. Balanced Sampler (Majority Capped at 200)
 
-**Problem**: 4:1 class imbalance (724 ActiveTB vs 178 ObsoleteTB boxes) pushed predictions toward the majority class.
+**Problem**: Oversampling the minority (boost multipliers) swung the batch composition too far — minority-only images became ~44% of every epoch while majority-only were ~25%, starving the ActiveTB head (ActiveTB AR stayed 0.000 while ObsoleteTB improved). Boosting one class just starves the other.
 
-**Fix**: Minority-only images get 8× sampling weight, mixed-class images get 5×, majority-only images get 1×.
+**Fix**: Instead of boosting, **cap each group's per-epoch draws**. The `WeightedRandomSampler` is built with per-group targets (empty=200, ActiveTB-only=200, ObsoleteTB-only=200, mixed=200) — the majority class contributes exactly as much as the minority. Both class heads see balanced gradient exposure, and augmentations make repeated draws valuable. Epoch becomes 800 samples (100 batches at batch size 8).
 
 ### 5. Increased Gradient Clipping Threshold
 
@@ -243,7 +243,7 @@ The following fixes were applied after the initial training run showed mAP stuck
 | Class priors | Frequency-based (0.80/0.20) | Neutral (pi=0.01, logit -4.60 all classes) |
 | Minority focal alpha | 0.633 | 0.75 (scalar 0.75 for EfficientDet) |
 | Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
-| Minority boost | 3× → 5× | 8× |
+| Minority sampling | 3× → 5× → 8× boost | Balanced cap: 200 draws/group/epoch |
 | Gradient clip | 5.0 | 10.0 |
 | Batch size (FCOS/RetinaNet) | 16 | 8 |
 | Batch size (EfficientDet/DETR) | 16/8 | 4 |

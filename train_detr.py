@@ -313,8 +313,12 @@ def get_param_groups(model, cfg):
 # Class-Frequency Weighted Sampler
 # =============================================================================
 def get_class_frequency_sampler(dataset):
+    """Balanced sampler: caps majority-class (ActiveTB) images at 200 draws per
+    epoch, matching minority (ObsoleteTB) and mixed images at 200 each, with a
+    fixed 200 negative draws. Majority no longer dominates the dataloader."""
     class_counts = {1: 0, 2: 0}
     image_labels = []
+    group_sizes = {"empty": 0, "majority_only": 0, "mixed": 0, "minority_only": 0}
 
     for idx in range(len(dataset)):
         img_id = dataset.ids[idx]
@@ -326,25 +330,46 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    minority_boost = 8.0
-    weights = []
     for labels in image_labels:
         if len(labels) == 0:
-            weights.append(0.05)  # small chance to learn background suppression
+            group_sizes["empty"] += 1
         else:
             has_minority = any(l == 2 for l in labels)
             has_majority = any(l == 1 for l in labels)
-            if has_minority and not has_majority:
-                w = minority_boost
-            elif has_minority and has_majority:
-                w = 1.0 + minority_boost / 2.0
+            if has_minority and has_majority:
+                group_sizes["mixed"] += 1
+            elif has_minority:
+                group_sizes["minority_only"] += 1
             else:
-                w = 1.0
-            weights.append(w)
+                group_sizes["majority_only"] += 1
+
+    per_epoch_targets = {
+        "empty": 200,
+        "majority_only": 200,
+        "minority_only": 200,
+        "mixed": 200,
+    }
+    num_samples = sum(per_epoch_targets.values())
+
+    weights = []
+    for labels in image_labels:
+        if len(labels) == 0:
+            g = "empty"
+        else:
+            has_minority = any(l == 2 for l in labels)
+            has_majority = any(l == 1 for l in labels)
+            if has_minority and has_majority:
+                g = "mixed"
+            elif has_minority:
+                g = "minority_only"
+            else:
+                g = "majority_only"
+        weights.append(per_epoch_targets[g] / max(1, group_sizes[g]))
 
     print(f"  Class counts: {class_counts}")
-    print(f"  ObsoleteTB boost: {minority_boost}x for minority-only images")
-    return WeightedRandomSampler(weights, len(weights), replacement=True)
+    print(f"  Group sizes: {group_sizes}")
+    print(f"  Per-epoch draws: {per_epoch_targets} (epoch = {num_samples} samples)")
+    return WeightedRandomSampler(weights, num_samples, replacement=True)
 
 
 # =============================================================================
