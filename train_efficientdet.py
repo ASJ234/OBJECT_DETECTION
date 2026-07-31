@@ -283,13 +283,13 @@ def build_efficientdet(cfg, class_priors=None):
 # =============================================================================
 # Class-Frequency Weighted Sampler
 # =============================================================================
-def get_class_frequency_sampler(dataset):
-    """Balanced sampler: caps majority-class (ActiveTB) images at 200 draws per
-    epoch, matching minority (ObsoleteTB) and mixed images at 200 each, with a
-    fixed 200 negative draws. Majority no longer dominates the dataloader."""
+def get_class_frequency_sampler(dataset, majority_ann_cap=200):
+    """Undersample the majority class for training: cap ActiveTB annotations at
+    `majority_ann_cap` (724 -> 200) so the model trains on ~200 ActiveTB vs ~178
+    ObsoleteTB annotations. All ObsoleteTB and mixed images are kept; excess
+    ActiveTB-only images are excluded (weight 0); negatives get weight 0.05."""
     class_counts = {1: 0, 2: 0}
     image_labels = []
-    group_sizes = {"empty": 0, "majority_only": 0, "mixed": 0, "minority_only": 0}
 
     for idx in range(len(dataset)):
         img_id = dataset.ids[idx]
@@ -301,46 +301,33 @@ def get_class_frequency_sampler(dataset):
             if lbl in class_counts:
                 class_counts[lbl] += 1
 
-    for labels in image_labels:
-        if len(labels) == 0:
-            group_sizes["empty"] += 1
-        else:
-            has_minority = any(l == 2 for l in labels)
-            has_majority = any(l == 1 for l in labels)
-            if has_minority and has_majority:
-                group_sizes["mixed"] += 1
-            elif has_minority:
-                group_sizes["minority_only"] += 1
-            else:
-                group_sizes["majority_only"] += 1
-
-    per_epoch_targets = {
-        "empty": 200,
-        "majority_only": 200,
-        "minority_only": 200,
-        "mixed": 200,
-    }
-    num_samples = sum(per_epoch_targets.values())
-
     weights = []
+    maj_used = 0
+    selected_pos = 0
+    kept_neg = 0
+    excluded = 0
     for labels in image_labels:
         if len(labels) == 0:
-            g = "empty"
+            weights.append(0.05)  # small chance to learn background suppression
+            kept_neg += 1
         else:
             has_minority = any(l == 2 for l in labels)
             has_majority = any(l == 1 for l in labels)
-            if has_minority and has_majority:
-                g = "mixed"
-            elif has_minority:
-                g = "minority_only"
+            if has_minority:
+                weights.append(1.0)  # minority-only or mixed: always kept
+                selected_pos += 1
+            elif maj_used < majority_ann_cap:
+                weights.append(1.0)  # majority-only kept until annotation cap
+                maj_used += len(labels)
+                selected_pos += 1
             else:
-                g = "majority_only"
-        weights.append(per_epoch_targets[g] / max(1, group_sizes[g]))
+                weights.append(0.0)  # excess majority: excluded from training
+                excluded += 1
 
     print(f"  Class counts: {class_counts}")
-    print(f"  Group sizes: {group_sizes}")
-    print(f"  Per-epoch draws: {per_epoch_targets} (epoch = {num_samples} samples)")
-    return WeightedRandomSampler(weights, num_samples, replacement=True)
+    print(f"  Majority cap: {majority_ann_cap} ActiveTB annotations (724 -> {maj_used})")
+    print(f"  Selected positives: {selected_pos}, negatives kept: {kept_neg}, majority excluded: {excluded}")
+    return WeightedRandomSampler(weights, int(sum(weights)), replacement=True)
 
 
 # =============================================================================

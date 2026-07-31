@@ -195,7 +195,7 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Problem**: Two failure modes. First, a hardcoded prior of 0.05 for both classes forced the model to learn the base rate from scratch. Then, per-class frequency priors (ActiveTB +1.39, ObsoleteTB -1.39) created a 2.8-logit gap — the minority head started in a "danger zone" and background gradient mass (5,400 background anchors vs 1-2 positive per image) drowned it below the 0.05 firing threshold, producing **zero** ObsoleteTB detections after 29 epochs.
 
-**Fix**: Neutral bias init — `pi = 0.01` (logit = -4.60) for every class, so no class starts ahead of or behind the other. Class balance comes from focal-loss alpha + oversampling instead of the bias. Minority (ObsoleteTB) alpha raised to 0.75 (FCOS/RetinaNet per-class; EfficientDet scalar `config.alpha`), weakening background pressure on its channel ((1-alpha) from 0.367 → 0.25).
+**Fix**: Neutral bias init — `pi = 0.01` (logit = -4.60) for every class, so no class starts ahead of or behind the other. Class balance comes from focal-loss alpha + the majority undersampler (Section 4) instead of the bias. Minority (ObsoleteTB) alpha raised to 0.75 (FCOS/RetinaNet per-class; EfficientDet scalar `config.alpha`), weakening background pressure on its channel ((1-alpha) from 0.367 → 0.25).
 
 ### 3. Higher Head Learning Rate
 
@@ -203,11 +203,11 @@ The following fixes were applied after the initial training run showed mAP stuck
 
 **Fix**: Head LR = 5× base LR (5e-4), backbone LR = 0.01× base LR (1e-5). This 500:1 ratio lets the head learn quickly while preserving pretrained features.
 
-### 4. Balanced Sampler (Majority Capped at 200)
+### 4. Majority-Class Undersampling (ActiveTB 724 → 200)
 
-**Problem**: Oversampling the minority (boost multipliers) swung the batch composition too far — minority-only images became ~44% of every epoch while majority-only were ~25%, starving the ActiveTB head (ActiveTB AR stayed 0.000 while ObsoleteTB improved). Boosting one class just starves the other.
+**Problem**: Two prior approaches both failed. Oversampling the minority (boost multipliers) swung batch composition too far — minority-only images became ~44% of every epoch while majority-only were ~25%, starving the ActiveTB head (ActiveTB AR stayed 0.000 while ObsoleteTB improved). A per-group cap sampler (200 draws/group) balanced the ratio but left all 724 ActiveTB annotations active in the dataset.
 
-**Fix**: Instead of boosting, **cap each group's per-epoch draws**. The `WeightedRandomSampler` is built with per-group targets (empty=200, ActiveTB-only=200, ObsoleteTB-only=200, mixed=200) — the majority class contributes exactly as much as the minority. Both class heads see balanced gradient exposure, and augmentations make repeated draws valuable. Epoch becomes 800 samples (100 batches at batch size 8).
+**Fix**: **Undersample the majority at the dataset level.** The `WeightedRandomSampler` keeps ActiveTB-only images only until the ActiveTB annotation cap (200) is reached; every excess majority-only image gets weight 0.0 and is excluded from training entirely. All ObsoleteTB and mixed images keep weight 1.0, and empty images keep weight 0.05. The sampler draws `int(sum(weights))` samples per epoch — one balanced pass over the reduced pool (~200 ActiveTB vs ~178 ObsoleteTB annotations, ~1.1:1 ratio). Verified with a mock mirroring the real distribution: majority capped at 200 annotations, ~515 samples/epoch, and 10-epoch simulation showed ActiveTB:ObsoleteTB annotation exposure ratio 1.14:1.
 
 ### 5. Increased Gradient Clipping Threshold
 
@@ -243,7 +243,7 @@ The following fixes were applied after the initial training run showed mAP stuck
 | Class priors | Frequency-based (0.80/0.20) | Neutral (pi=0.01, logit -4.60 all classes) |
 | Minority focal alpha | 0.633 | 0.75 (scalar 0.75 for EfficientDet) |
 | Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
-| Minority sampling | 3× → 5× → 8× boost | Balanced cap: 200 draws/group/epoch |
+| Minority sampling | 3× → 5× → 8× boost → per-group cap | Majority undersampled: ActiveTB capped at 200 anns, excess excluded (weight 0); negatives weight 0.05 |
 | Gradient clip | 5.0 | 10.0 |
 | Batch size (FCOS/RetinaNet) | 16 | 8 |
 | Batch size (EfficientDet/DETR) | 16/8 | 4 |

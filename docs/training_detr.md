@@ -41,11 +41,11 @@
 - **EMA**: Exponential moving average (decay=0.99) for smoother validation
 
 ### 4. Sampling Strategy
-- WeightedRandomSampler with minority class boost:
-  - ObsoleteTB-only images: 3× weight
-  - Mixed images (both classes): 2.5× weight
-  - ActiveTB-only images: 1× weight
-  - Empty images: 0× weight (filtered out)
+- WeightedRandomSampler with majority undersampling:
+  - ActiveTB-only images kept only until the 200-annotation cap (724 → 200); excess get weight 0 (excluded)
+  - ObsoleteTB-only and mixed images: 1× weight (all kept, ~178 annotations)
+  - Empty images: 0.05× weight (background suppression)
+  - One pass over the reduced pool per epoch (~200 ActiveTB vs ~178 ObsoleteTB annotations)
 
 ### 5. Loss Function
 - **Hungarian Matching**: Matches 100 predictions to GT objects (one-to-one)
