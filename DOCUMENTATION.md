@@ -95,10 +95,10 @@ Creates:
 
 ### 3. Train models
 ```bash
-python train_fcos.py          # FCOS — 100 epochs, batch 8
-python train_efficientdet.py  # EfficientDet-D2 — 100 epochs, batch 8
-python train_retinanet.py     # RetinaNet — 100 epochs, batch 8
-python train_detr.py          # DETR — 100 epochs, batch 4
+python train_fcos.py          # FCOS — 75 epochs, batch 8
+python train_efficientdet.py  # EfficientDet-D2 — 75 epochs, batch 8
+python train_retinanet.py     # RetinaNet — 75 epochs, batch 8
+python train_detr.py          # DETR — 75 epochs, batch 4
 ```
 
 Each script:
@@ -235,6 +235,12 @@ The following fixes were applied after the initial training run showed mAP stuck
 | GPU OOM cascade in `run_all.py` | Added `torch.cuda.empty_cache()` between runs, reduced batch sizes to 8/4 |
 | Missing `transformers` for DETR | Added dependency check in `run_all.py` |
 
+### 9. Higher Input Resolution (min_size 800 → 1024)
+
+**Problem**: After the class-imbalance fixes, both classes localize well (GT boxes matched at IoU 0.72) but the two heads still confound each other — the model kept labeling ObsoleteTB regions as ActiveTB (run 5: ActiveTB AR 0.344, ObsoleteTB AR 0.059 at E29). The 800px transform downscales chest X-rays heavily, removing the subtle texture cues (cavitation, scarring) that separate the two classes.
+
+**Fix**: Raised `image_min_size` to 1024 (max_size 1536) in the FCOS and RetinaNet configs so the class head sees more discriminative detail; extended training to 75 epochs to stretch the cosine-LR tail. `--min-size`/`--max-size` CLI flags override per-run. Eval and XAI inherit the same resolution from the config.
+
 ### Parameter Summary
 
 | Parameter | Before | After |
@@ -245,6 +251,8 @@ The following fixes were applied after the initial training run showed mAP stuck
 | Head:backbone LR ratio | 10:1 | 500:1 (head 5e-4, backbone 1e-5) |
 | Minority sampling | 3× → 5× → 8× boost → per-group cap | Majority undersampled: ActiveTB capped at 200 anns, excess excluded (weight 0); negatives weight 0.05 |
 | Gradient clip | 5.0 | 10.0 |
+| Input resolution | min_size 800 / max_size 1333 | min_size 1024 / max_size 1536 |
+| Epochs | 50 | 75 |
 | Batch size (FCOS/RetinaNet) | 16 | 8 |
 | Batch size (EfficientDet/DETR) | 16/8 | 4 |
 | num_workers | 2 | 0 |

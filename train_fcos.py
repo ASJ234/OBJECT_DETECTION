@@ -45,9 +45,11 @@ DEFAULT_CONFIG = {
     "model": {
         "name": "FCOS-ResNet50-FPN",
         "num_classes": 2,
+        "image_min_size": 1024,
+        "image_max_size": 1536,
     },
     "training": {
-        "epochs": 50,
+        "epochs": 75,
         "batch_size": 8,
         "lr": 1e-4,
         "optimizer": "AdamW",
@@ -103,6 +105,8 @@ def parse_args():
     p.add_argument("--early-stop-patience", type=int, default=None)
     p.add_argument("--save-every", type=int, default=None)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--min-size", type=int, default=None)
+    p.add_argument("--max-size", type=int, default=None)
     p.add_argument("--resume", type=str, default=None)
     p.add_argument("--results-dir", type=str, default=None)
     p.add_argument("--no-push-to-hub", action="store_true",
@@ -133,6 +137,10 @@ def get_config():
         t["early_stop_patience"] = args.early_stop_patience
     if args.save_every is not None: t["save_every"] = args.save_every
     if args.seed is not None: t["seed"] = args.seed
+    if args.min_size is not None:
+        cfg["model"]["image_min_size"] = args.min_size
+    if args.max_size is not None:
+        cfg["model"]["image_max_size"] = args.max_size
     if args.resume is not None: t["resume"] = args.resume
     if args.results_dir is not None: cfg["results_dir"] = args.results_dir
     if args.no_push_to_hub: t["push_to_hub"] = False
@@ -257,9 +265,13 @@ def _patch_fcos_loss(head, class_alphas):
         }
     head.compute_loss = patched.__get__(head, type(head))
 
-def get_fcos_model(num_classes, score_thresh=0.05, class_priors=None, class_alphas=None):
+def get_fcos_model(num_classes, score_thresh=0.05, class_priors=None, class_alphas=None,
+                   image_min_size=800, image_max_size=1333):
     import math
-    model = fcos_resnet50_fpn(weights="DEFAULT", score_thresh=score_thresh)
+    model = fcos_resnet50_fpn(
+        weights="DEFAULT", score_thresh=score_thresh,
+        min_size=image_min_size, max_size=image_max_size,
+    )
     in_channels = model.head.classification_head.cls_logits.in_channels
     num_anchors = model.head.classification_head.num_anchors
     
@@ -340,6 +352,10 @@ def train(cfg):
     class_alphas = [0.25] * n_classes  # symmetric focal alpha: undersampler already balances class counts
     print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
     print(f"  Focal loss alphas: symmetric 0.25 for all classes (counts {class_counts} balanced by sampler)")
+    print(
+        f"  Input resolution: min_size={cfg['model'].get('image_min_size', 800)} "
+        f"max_size={cfg['model'].get('image_max_size', 1333)}"
+    )
 
     class_alphas_tensor = torch.tensor(class_alphas)
 
@@ -349,6 +365,8 @@ def train(cfg):
             score_thresh=0.05,
             class_priors=class_priors,
             class_alphas=class_alphas_tensor,
+            image_min_size=cfg["model"].get("image_min_size", 800),
+            image_max_size=cfg["model"].get("image_max_size", 1333),
         )
         use_pretrained = True
         print("  Loaded pretrained COCO weights and replaced head")
@@ -359,6 +377,8 @@ def train(cfg):
             weights_backbone=None,
             num_classes=cfg["model"]["num_classes"],
             score_thresh=0.05,
+            min_size=cfg["model"].get("image_min_size", 800),
+            max_size=cfg["model"].get("image_max_size", 1333),
         )
     model.to(device)
 
@@ -551,6 +571,8 @@ def evaluate_model(cfg):
     model = get_fcos_model(
         num_classes=cfg["model"]["num_classes"],
         score_thresh=0.05,
+        image_min_size=cfg["model"].get("image_min_size", 800),
+        image_max_size=cfg["model"].get("image_max_size", 1333),
     )
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"
@@ -661,6 +683,8 @@ def run_xai(cfg):
     model = get_fcos_model(
         num_classes=cfg["model"]["num_classes"],
         score_thresh=0.05,
+        image_min_size=cfg["model"].get("image_min_size", 800),
+        image_max_size=cfg["model"].get("image_max_size", 1333),
     )
     ema_path = f"{results_dir}/weights/ema_model.pth"
     best_path = f"{results_dir}/weights/best_model.pth"

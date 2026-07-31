@@ -50,9 +50,11 @@ DEFAULT_CONFIG = {
         "use_custom_anchors": False,
         "anchor_sizes": ((16,), (32,), (64,), (128,), (256,)),
         "aspect_ratios": ((0.5, 1.0, 2.0),) * 5,
+        "image_min_size": 1024,
+        "image_max_size": 1536,
     },
     "training": {
-        "epochs": 50,
+        "epochs": 75,
         "batch_size": 8,
         "lr": 1e-4,
         "optimizer": "AdamW",
@@ -108,6 +110,8 @@ def parse_args():
     p.add_argument("--early-stop-patience", type=int, default=None)
     p.add_argument("--save-every", type=int, default=None)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--min-size", type=int, default=None)
+    p.add_argument("--max-size", type=int, default=None)
     p.add_argument("--resume", type=str, default=None)
     p.add_argument("--results-dir", type=str, default=None)
     p.add_argument("--no-custom-anchors", action="store_true",
@@ -140,6 +144,10 @@ def get_config():
         t["early_stop_patience"] = args.early_stop_patience
     if args.save_every is not None: t["save_every"] = args.save_every
     if args.seed is not None: t["seed"] = args.seed
+    if args.min_size is not None:
+        cfg["model"]["image_min_size"] = args.min_size
+    if args.max_size is not None:
+        cfg["model"]["image_max_size"] = args.max_size
     if args.resume is not None: t["resume"] = args.resume
     if args.results_dir is not None: cfg["results_dir"] = args.results_dir
     if args.no_custom_anchors: m["use_custom_anchors"] = False
@@ -238,9 +246,14 @@ def build_retinanet(cfg, class_priors=None, class_alphas=None):
     num_classes = cfg["model"]["num_classes"]
     use_custom = cfg["model"].get("use_custom_anchors", True)
     use_pretrained = False
+    image_min_size = cfg["model"].get("image_min_size", 800)
+    image_max_size = cfg["model"].get("image_max_size", 1333)
 
     try:
-        model = retinanet_resnet50_fpn_v2(weights="DEFAULT", score_thresh=0.05)
+        model = retinanet_resnet50_fpn_v2(
+            weights="DEFAULT", score_thresh=0.05,
+            min_size=image_min_size, max_size=image_max_size,
+        )
         from torchvision.models.detection.retinanet import RetinaNetClassificationHead, RetinaNetRegressionHead
         in_features = model.head.classification_head.conv[0][0].in_channels
         
@@ -269,6 +282,7 @@ def build_retinanet(cfg, class_priors=None, class_alphas=None):
         try:
             model = retinanet_resnet50_fpn_v2(
                 weights_backbone="DEFAULT", num_classes=num_classes, score_thresh=0.05,
+                min_size=image_min_size, max_size=image_max_size,
             )
             if use_custom:
                 anchor_sizes = cfg["model"]["anchor_sizes"]
@@ -281,6 +295,7 @@ def build_retinanet(cfg, class_priors=None, class_alphas=None):
             warnings.warn("Could not load pretrained weights, using random init.")
             model = retinanet_resnet50_fpn_v2(
                 weights_backbone=None, num_classes=num_classes, score_thresh=0.05,
+                min_size=image_min_size, max_size=image_max_size,
             )
             if use_custom:
                 anchor_sizes = cfg["model"]["anchor_sizes"]

@@ -32,8 +32,9 @@
 - **Optimizer**: AdamW with two LR groups:
   - Backbone (ResNet50 + FPN): LR = 1e-5 (10× smaller)
   - Head (classification + regression + centerness): LR = 1e-4
-- **LR Schedule**: Cosine annealing from initial LR → 1e-7 over 50 epochs
-- **Gradient Clipping**: Max norm = 5.0
+- **LR Schedule**: Cosine annealing from initial LR → 1e-7 over 75 epochs
+- **Gradient Clipping**: Max norm = 10.0
+- **Input Resolution**: `image_min_size` 1024 / `image_max_size` 1536 (higher res to keep subtle active-vs-healed TB texture cues)
 - **EMA**: Exponential moving average (decay=0.99)
 
 ### 4. Sampling Strategy
