@@ -700,11 +700,11 @@ def run_xai(cfg):
     model.to(device)
     model.eval()
 
-    xai_ann = cfg["data"].get("test_ann", "dataset/coco/test.json")
-    xai_img_dir = cfg["data"].get("test_images", "dataset/coco/test")
+    xai_ann = cfg["data"].get("val_ann", "dataset/coco/val.json")
+    xai_img_dir = cfg["data"].get("val_images", "dataset/coco/val")
     if not os.path.isfile(xai_ann):
-        xai_ann = cfg["data"].get("val_ann", "dataset/coco/val.json")
-        xai_img_dir = cfg["data"]["val_images"]
+        xai_ann = cfg["data"].get("test_ann", "dataset/coco/test.json")
+        xai_img_dir = cfg["data"].get("test_images", "dataset/coco/test")
     if not os.path.exists(xai_ann):
         print("[FCOS] No dataset available for XAI.")
         return

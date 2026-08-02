@@ -181,41 +181,44 @@ def push_to_hub(results_dir, cfg, best_map=None, best_epoch=None,
 
     print(f"[HF] Pushing to hub: {repo_id}")
 
-    repo_url = api.create_repo(
-        repo_id, token=auth_token, repo_type="model",
-        exist_ok=True, private=private,
-    )
+    try:
+        repo_url = api.create_repo(
+            repo_id, token=auth_token, repo_type="model",
+            exist_ok=True, private=private,
+        )
+    except Exception as e:
+        print(f"[HF] Failed to create/access repo {repo_id}: {e}")
+        return None
     print(f"[HF] Repo: {repo_url}")
+    full_repo_id = "/".join(repo_url.rstrip("/").split("/")[-2:])
 
     pushed_files = []
+
+    def _upload(path_or_fileobj, repo_path, commit_message):
+        try:
+            api.upload_file(
+                path_or_fileobj=path_or_fileobj,
+                path_in_repo=repo_path,
+                repo_id=full_repo_id,
+                token=auth_token,
+                commit_message=commit_message,
+            )
+            pushed_files.append(repo_path)
+            print(f"  Uploaded {repo_path}")
+        except Exception as e:
+            print(f"[HF] Skipping {repo_path} (failed, non-fatal): {e}")
 
     weight_files = ["weights/ema_model.pth", "weights/best_model.pth"]
     for wf in weight_files:
         fpath = results_path / wf
         if fpath.exists():
-            api.upload_file(
-                path_or_fileobj=str(fpath),
-                path_in_repo=wf,
-                repo_id=repo_id,
-                token=auth_token,
-                commit_message=f"Upload {wf}",
-            )
-            pushed_files.append(wf)
-            print(f"  Uploaded {wf}")
+            _upload(str(fpath), wf, f"Upload {wf}")
 
     metadata_files = ["config.json", "metrics.json", "metrics_tta.json"]
     for mf in metadata_files:
         fpath = results_path / mf
         if fpath.exists():
-            api.upload_file(
-                path_or_fileobj=str(fpath),
-                path_in_repo=mf,
-                repo_id=repo_id,
-                token=auth_token,
-                commit_message=f"Upload {mf}",
-            )
-            pushed_files.append(mf)
-            print(f"  Uploaded {mf}")
+            _upload(str(fpath), mf, f"Upload {mf}")
 
     metrics = {}
     metrics_path = results_path / "metrics.json"
@@ -224,15 +227,7 @@ def push_to_hub(results_dir, cfg, best_map=None, best_epoch=None,
             metrics = json.load(f)
 
     model_card = _generate_model_card(model_type, cfg, best_map, best_epoch, metrics)
-    api.upload_file(
-        path_or_fileobj=model_card.encode("utf-8"),
-        path_in_repo="README.md",
-        repo_id=repo_id,
-        token=auth_token,
-        commit_message="Upload model card",
-    )
-    pushed_files.append("README.md")
-    print("  Uploaded README.md (model card)")
+    _upload(model_card.encode("utf-8"), "README.md", "Upload model card")
 
     asset_dirs = [
         ("curves", ["training_curves.png"]),
@@ -247,32 +242,17 @@ def push_to_hub(results_dir, cfg, best_map=None, best_epoch=None,
                 fpath = results_path / fname
                 repo_path = fname
             if fpath.exists():
-                api.upload_file(
-                    path_or_fileobj=str(fpath),
-                    path_in_repo=repo_path,
-                    repo_id=repo_id,
-                    token=auth_token,
-                    commit_message=f"Upload {repo_path}",
-                )
-                pushed_files.append(repo_path)
-                print(f"  Uploaded {repo_path}")
+                _upload(str(fpath), repo_path, f"Upload {repo_path}")
 
     explain_dir = results_path / "explain"
     if explain_dir.exists():
         explain_files = sorted(explain_dir.glob("*.png"))[:10]
         for ef in explain_files:
-            api.upload_file(
-                path_or_fileobj=str(ef),
-                path_in_repo=f"explain/{ef.name}",
-                repo_id=repo_id,
-                token=auth_token,
-                commit_message=f"Upload explain/{ef.name}",
-            )
-            pushed_files.append(f"explain/{ef.name}")
+            _upload(str(ef), f"explain/{ef.name}", f"Upload explain/{ef.name}")
         if explain_files:
             print(f"  Uploaded {len(explain_files)} XAI visualizations")
 
-    hub_url = f"https://huggingface.co/{repo_id}"
+    hub_url = f"https://huggingface.co/{full_repo_id}"
     print(f"\n[HF] Push complete! {len(pushed_files)} files uploaded.")
     print(f"[HF] View at: {hub_url}")
     return hub_url
