@@ -4,8 +4,8 @@ import time
 
 
 PIPELINES = [
-    ("FCOS", "train_fcos.py", ["--batch-size", "16"]),
-    ("RetinaNet", "train_retinanet.py", ["--batch-size", "16"]),
+    ("FCOS", "train_fcos.py", ["--batch-size", "8"]),
+    ("RetinaNet", "train_retinanet.py", ["--batch-size", "8"]),
 ]
 
 
