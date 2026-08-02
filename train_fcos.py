@@ -350,7 +350,7 @@ def train(cfg):
     n_classes = cfg["model"]["num_classes"]
     
     class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
-    class_alphas = per_class_focal_alphas(class_counts, n_classes)
+    class_alphas = per_class_focal_alphas(class_counts, n_classes, max_alpha=0.5)
     print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
     print(f"  Focal loss alphas: per-class inverse-frequency {class_alphas} (counts {class_counts})")
     print(
