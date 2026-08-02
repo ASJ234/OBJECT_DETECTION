@@ -31,6 +31,7 @@ from utils.engine import (
     train_one_epoch, evaluate, evaluate_test,
     compute_confusion_matrix, save_confusion_matrix_plot,
     plot_training_curves, _worker_init_fn, gpu_cleanup,
+    per_class_focal_alphas,
 )
 from utils.ema import ModelEMA
 from utils.huggingface_hub import push_to_hub
@@ -364,9 +365,9 @@ def train(cfg):
     n_classes = cfg["model"]["num_classes"]
     
     class_priors = [0.05] * n_classes  # neutral bias: object prior for every class
-    class_alphas = [0.25] * n_classes  # symmetric focal alpha: undersampler already balances class counts
+    class_alphas = per_class_focal_alphas(class_counts, n_classes)
     print(f"  Neutral bias init: pi=0.05 for all classes (logit=-2.94)")
-    print(f"  Focal loss alphas: symmetric 0.25 for all classes (counts {class_counts} balanced by sampler)")
+    print(f"  Focal loss alphas: per-class inverse-frequency {class_alphas} (counts {class_counts})")
 
     class_alphas_tensor = torch.tensor(class_alphas)
     model, use_pretrained = build_retinanet(cfg, class_priors=class_priors, class_alphas=class_alphas_tensor)

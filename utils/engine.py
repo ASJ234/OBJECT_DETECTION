@@ -34,6 +34,19 @@ def _worker_init_fn(worker_id: int):
     random.seed(worker_seed)
 
 
+def per_class_focal_alphas(class_counts, n_classes, base_alpha=0.25, max_alpha=0.9):
+    """Focal-loss alpha per head class, weighted by inverse class frequency.
+
+    class_counts is keyed by COCO category_id (1..n_classes); head class index c
+    corresponds to category_id c + 1. Alphas scale the foreground term of the
+    focal loss so the rare class (e.g. ObsoleteTB) isn't sacrificed to the
+    majority class. The most frequent class keeps base_alpha.
+    """
+    counts = [max(class_counts.get(cid, 1), 1) for cid in range(1, n_classes + 1)]
+    alphas = [base_alpha * counts[0] / c for c in counts]
+    return [min(a, max_alpha) for a in alphas]
+
+
 def gpu_cleanup(*models):
     for m in models:
         del m

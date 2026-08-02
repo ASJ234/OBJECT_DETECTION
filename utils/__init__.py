@@ -4,6 +4,7 @@ from .engine import (
     compute_confusion_matrix, save_confusion_matrix_plot,
     set_seed, MetricTracker, save_checkpoint, load_checkpoint,
     plot_training_curves, generate_summary_report,
+    per_class_focal_alphas,
 )
 from .ema import ModelEMA
 from .huggingface_hub import push_to_hub
