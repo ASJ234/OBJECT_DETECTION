@@ -4,6 +4,9 @@ images.zip
 wandb/
 dataset/
 
+# ── Training results (models, preds, metrics) ────────────────────────────────
+results/
+
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
