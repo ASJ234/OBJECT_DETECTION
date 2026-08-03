@@ -13,8 +13,10 @@ import sys
 import json
 import copy
 import argparse
+from functools import partial
 
 import torch
+import torch.nn as nn
 import numpy as np
 import wandb
 from torch.utils.data import DataLoader, WeightedRandomSampler
@@ -62,7 +64,7 @@ DEFAULT_CONFIG = {
         "weight_decay": 1e-4,
         "momentum": 0.9,
         "clip_norm": 10.0,
-        "warmup_epochs": 0,
+        "warmup_epochs": 3,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
@@ -167,8 +169,13 @@ def get_class_frequency_sampler(dataset, majority_ann_cap=200):
     """Undersample the majority class for training: cap ActiveTB annotations at
     `majority_ann_cap` (724 -> 200) so the model trains on ~200 ActiveTB vs ~178
     ObsoleteTB annotations. All ObsoleteTB and mixed images are kept; excess
-    ActiveTB-only images are excluded (weight 0); negatives get weight 0.05."""
+    ActiveTB-only images are excluded (weight 0); negatives get weight 0.05.
+
+    Returns (sampler, effective_counts) where effective_counts reflects what the
+    model actually trains on (used to derive focal-loss alphas so we don't
+    double-count the class imbalance that the sampler already removes)."""
     class_counts = {1: 0, 2: 0}
+    effective_counts = {1: 0, 2: 0}
     image_labels = []
 
     for idx in range(len(dataset)):
@@ -195,9 +202,13 @@ def get_class_frequency_sampler(dataset, majority_ann_cap=200):
             has_majority = any(l == 1 for l in labels)
             if has_minority:
                 weights.append(1.0)  # minority-only or mixed: always kept
+                for lbl in labels:
+                    effective_counts[lbl] += 1
                 selected_pos += 1
             elif maj_used < majority_ann_cap:
                 weights.append(1.0)  # majority-only kept until annotation cap
+                for lbl in labels:
+                    effective_counts[lbl] += 1
                 maj_used += len(labels)
                 selected_pos += 1
             else:
@@ -205,9 +216,10 @@ def get_class_frequency_sampler(dataset, majority_ann_cap=200):
                 excluded += 1
 
     print(f"  Class counts: {class_counts}")
+    print(f"  Effective counts after sampling: {effective_counts}")
     print(f"  Majority cap: {majority_ann_cap} ActiveTB annotations (724 -> {maj_used})")
     print(f"  Selected positives: {selected_pos}, negatives kept: {kept_neg}, majority excluded: {excluded}")
-    return WeightedRandomSampler(weights, int(sum(weights)), replacement=True)
+    return WeightedRandomSampler(weights, int(sum(weights)), replacement=True), effective_counts
 
 
 # =============================================================================
@@ -220,9 +232,15 @@ def _apply_class_priors(model, num_classes, class_priors):
         mask = torch.arange(bias.size(0), device=bias.device) % num_classes == c
         bias.data[mask] = -math.log((1 - pi) / pi)
 
-def _patch_retinanet_loss(head_cls, class_alphas):
+def _patch_retinanet_loss(head_cls, class_alphas, neg_loss_scale=0.1):
+    """Patch RetinaNet classification loss with per-class focal alphas.
+
+    Negative-only images (no matched foreground) are damped by `neg_loss_scale`
+    because their loss is summed over all ~300k background anchors but divided
+    by max(1, n_fg)=1, letting a single negative image outweigh a positive one
+    by ~500x and pinning the classification logits at the background prior.
+    """
     from torchvision.ops import sigmoid_focal_loss
-    original_fn = head_cls.compute_loss
     def patched(self, targets, head_outputs, matched_idxs):
         losses = []
         cls_logits = head_outputs["cls_logits"]
@@ -239,7 +257,10 @@ def _patch_retinanet_loss(head_cls, class_alphas):
                     logits[valid, c], gt_target[valid, c],
                     alpha=alpha, reduction="sum"
                 )
-            losses.append(loss_cls / max(1, n_fg))
+            if n_fg > 0:
+                losses.append(loss_cls / n_fg)
+            else:
+                losses.append(loss_cls * neg_loss_scale)
         return torch.stack(losses).sum() / max(1, len(targets))
     head_cls.compute_loss = patched.__get__(head_cls, type(head_cls))
 
@@ -258,6 +279,14 @@ def build_retinanet(cfg, class_priors=None, class_alphas=None):
         from torchvision.models.detection.retinanet import RetinaNetClassificationHead, RetinaNetRegressionHead
         in_features = model.head.classification_head.conv[0][0].in_channels
         
+        # Keep references to the pretrained heads so the class-agnostic conv
+        # stacks can be warm-started below (the final cls_logits/bbox_pred
+        # convs are always freshly initialized).
+        pretrained_cls_head = model.head.classification_head
+        pretrained_reg_head = model.head.regression_head
+        # v2 heads are built with GroupNorm; match it so state_dicts align.
+        norm_layer = partial(nn.GroupNorm, 32)
+        
         if use_custom:
             anchor_sizes = cfg["model"]["anchor_sizes"]
             aspect_ratios = cfg["model"]["aspect_ratios"]
@@ -269,12 +298,24 @@ def build_retinanet(cfg, class_priors=None, class_alphas=None):
             n_anchors = model.head.classification_head.num_anchors
             
         model.head.classification_head = RetinaNetClassificationHead(
-            in_features, n_anchors, num_classes
+            in_features, n_anchors, num_classes, norm_layer=norm_layer
         )
+        # Warm-start the class-agnostic conv stack from the pretrained COCO
+        # head. With only ~200 foreground anchors vs ~300k background anchors
+        # per image, a fully random head struggles to escape the background
+        # prior (scores pinned at the bias init); pretrained convs fix that.
+        model.head.classification_head.conv.load_state_dict(
+            pretrained_cls_head.conv.state_dict()
+        )
+        print("  Warm-started classification head convs from pretrained COCO head")
         if use_custom:
             model.head.regression_head = RetinaNetRegressionHead(
-                in_features, n_anchors
+                in_features, n_anchors, norm_layer=norm_layer
             )
+            model.head.regression_head.conv.load_state_dict(
+                pretrained_reg_head.conv.state_dict()
+            )
+            print("  Warm-started regression head convs from pretrained COCO head")
             
         use_pretrained = True
         print("  Loaded COCO-pretrained RetinaNet-V2 (backbone + neck) and replaced head")
@@ -342,7 +383,7 @@ def train(cfg):
     batch_size = cfg["training"]["batch_size"]
 
     print("[RetinaNet] Building weighted sampler for class-imbalanced dataset...")
-    sampler = get_class_frequency_sampler(train_dataset)
+    sampler, effective_counts = get_class_frequency_sampler(train_dataset)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, sampler=sampler,
@@ -365,9 +406,12 @@ def train(cfg):
     n_classes = cfg["model"]["num_classes"]
     
     class_priors = [0.05] * n_classes  # neutral bias: object prior for every class
-    class_alphas = per_class_focal_alphas(class_counts, n_classes, max_alpha=0.35)
+    class_alphas = per_class_focal_alphas(
+        effective_counts, n_classes, base_alpha=0.35, max_alpha=0.75
+    )
     print(f"  Neutral bias init: pi=0.05 for all classes (logit=-2.94)")
-    print(f"  Focal loss alphas: per-class inverse-frequency {class_alphas} (counts {class_counts})")
+    print(f"  Focal loss alphas: inverse-frequency of SAMPLED counts "
+          f"{class_alphas} (raw {class_counts})")
 
     class_alphas_tensor = torch.tensor(class_alphas)
     model, use_pretrained = build_retinanet(cfg, class_priors=class_priors, class_alphas=class_alphas_tensor)

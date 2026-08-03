@@ -57,7 +57,7 @@ DEFAULT_CONFIG = {
         "weight_decay": 1e-4,
         "momentum": 0.9,
         "clip_norm": 10.0,
-        "warmup_epochs": 0,
+        "warmup_epochs": 3,
         "ema_decay": 0.99,
         "early_stop_patience": 30,
         "save_every": 10,
@@ -157,8 +157,13 @@ def get_class_frequency_sampler(dataset, majority_ann_cap=200):
     """Undersample the majority class for training: cap ActiveTB annotations at
     `majority_ann_cap` (724 -> 200) so the model trains on ~200 ActiveTB vs ~178
     ObsoleteTB annotations. All ObsoleteTB and mixed images are kept; excess
-    ActiveTB-only images are excluded (weight 0); negatives get weight 0.05."""
+    ActiveTB-only images are excluded (weight 0); negatives get weight 0.05.
+
+    Returns (sampler, effective_counts) where effective_counts reflects what the
+    model actually trains on (used to derive focal-loss alphas so we don't
+    double-count the class imbalance that the sampler already removes)."""
     class_counts = {1: 0, 2: 0}
+    effective_counts = {1: 0, 2: 0}
     image_labels = []
 
     for idx in range(len(dataset)):
@@ -185,9 +190,13 @@ def get_class_frequency_sampler(dataset, majority_ann_cap=200):
             has_majority = any(l == 1 for l in labels)
             if has_minority:
                 weights.append(1.0)  # minority-only or mixed: always kept
+                for lbl in labels:
+                    effective_counts[lbl] += 1
                 selected_pos += 1
             elif maj_used < majority_ann_cap:
                 weights.append(1.0)  # majority-only kept until annotation cap
+                for lbl in labels:
+                    effective_counts[lbl] += 1
                 maj_used += len(labels)
                 selected_pos += 1
             else:
@@ -195,9 +204,10 @@ def get_class_frequency_sampler(dataset, majority_ann_cap=200):
                 excluded += 1
 
     print(f"  Class counts: {class_counts}")
+    print(f"  Effective counts after sampling: {effective_counts}")
     print(f"  Majority cap: {majority_ann_cap} ActiveTB annotations (724 -> {maj_used})")
     print(f"  Selected positives: {selected_pos}, negatives kept: {kept_neg}, majority excluded: {excluded}")
-    return WeightedRandomSampler(weights, int(sum(weights)), replacement=True)
+    return WeightedRandomSampler(weights, int(sum(weights)), replacement=True), effective_counts
 
 
 # =============================================================================
@@ -257,6 +267,18 @@ def _patch_fcos_loss(head, class_alphas):
         pred_ctrness = bbox_ctrness.squeeze(dim=2)
         loss_bbox_ctrness = torch.nn.functional.binary_cross_entropy_with_logits(
             pred_ctrness[foregroud_mask], gt_ctrness_targets[foregroud_mask], reduction="sum")
+
+        # Also supervise centerness on background cells (target 0). Without it,
+        # background centerness is unconstrained and multiplies small cls
+        # probabilities into a flood of low-confidence detections
+        # (score = sqrt(cls * ctr) staying above the 0.05 threshold).
+        if (~foregroud_mask).any():
+            loss_bbox_ctrness_bg = torch.nn.functional.binary_cross_entropy_with_logits(
+                pred_ctrness[~foregroud_mask],
+                pred_ctrness.new_zeros((~foregroud_mask).sum()),
+                reduction="mean",
+            )
+            loss_bbox_ctrness = loss_bbox_ctrness + 0.25 * loss_bbox_ctrness_bg
 
         n = max(1, num_foreground)
         return {
@@ -327,7 +349,7 @@ def train(cfg):
     batch_size = cfg["training"]["batch_size"]
 
     print("[FCOS] Building weighted sampler for class-imbalanced dataset...")
-    sampler = get_class_frequency_sampler(train_dataset)
+    sampler, effective_counts = get_class_frequency_sampler(train_dataset)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, sampler=sampler,
@@ -350,9 +372,12 @@ def train(cfg):
     n_classes = cfg["model"]["num_classes"]
     
     class_priors = [0.01] * n_classes  # neutral bias: object prior for every class
-    class_alphas = per_class_focal_alphas(class_counts, n_classes, max_alpha=0.35)
+    class_alphas = per_class_focal_alphas(
+        effective_counts, n_classes, base_alpha=0.35, max_alpha=0.75
+    )
     print(f"  Neutral bias init: pi=0.01 for all classes (logit=-4.60)")
-    print(f"  Focal loss alphas: per-class inverse-frequency {class_alphas} (counts {class_counts})")
+    print(f"  Focal loss alphas: inverse-frequency of SAMPLED counts "
+          f"{class_alphas} (raw {class_counts})")
     print(
         f"  Input resolution: min_size={cfg['model'].get('image_min_size', 800)} "
         f"max_size={cfg['model'].get('image_max_size', 1333)}"
@@ -407,8 +432,8 @@ def train(cfg):
     else:
         optimizer = torch.optim.SGD(
             [
-                {"params": backbone_params, "lr": scaled_lr * 0.1},
-                {"params": head_params, "lr": scaled_lr},
+                {"params": backbone_params, "lr": lr * 0.1},
+                {"params": head_params, "lr": lr},
             ],
             momentum=cfg["training"]["momentum"],
             weight_decay=cfg["training"]["weight_decay"],
