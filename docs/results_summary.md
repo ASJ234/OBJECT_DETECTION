@@ -11,6 +11,19 @@ Two runs per model:
 - **v1** — baseline (raw-count alphas `[0.25, 0.35]`, RetinaNet head randomly initialized, no negative-image loss damping)
 - **v2** — Fix Round 2 (sampled-count alphas `[0.35, 0.446]`, warmup 3, RetinaNet head warm-started + `neg_loss_scale=0.1`, FCOS background-centerness supervision, RetinaNet batch 4 to fit the 11 GB card)
 
+## EDA findings
+
+Source: `eda.py` → `results/eda/` (`dataset_summary.txt` + plots).
+
+- **Dataset**: 11,702 images total — train 6,600, val 1,800, test 3,302. All 512×512.
+- **Extreme sparsity**: only 799 images (6.8%) contain boxes; 1,211 boxes total. 93.2% of images are pure negatives.
+- **Class imbalance ~4:1**: 972 ActiveTB boxes (80.3%) vs 239 ObsoleteTB (19.7%).
+- **Tags ↔ boxes are aligned**: `active_tb` → ActiveTB, `latent_tb` → ObsoleteTB, `active&latent_tb` → both (~50/50). `healthy` / `sick_but_non-tb` → no boxes (negatives).
+- **Image-level tags**: healthy 32.5%, sick_but_non-tb 32.5%, active_tb 5.4%, latent_tb 1.2%, active&latent_tb 0.3%.
+- **Test set**: 3,302 images, no tags, no boxes — inference only.
+
+Drives the training setup: negatives kept with sampler weight 0.05, per-epoch class balancing (200-box ActiveTB cap), and val-based evaluation.
+
 ## v2 — headline comparison
 
 | Metric | FCOS v2 | FCOS v1 | RetinaNet v2 | RetinaNet v1 |
