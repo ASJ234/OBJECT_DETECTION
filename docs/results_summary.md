@@ -38,12 +38,12 @@ Drives the training setup: negatives kept with sampler weight 0.05, per-epoch cl
 Sources: `results/fcos/metrics.json`, `results/retinanet/metrics.json` (v2 best-model COCO eval);
 v1 numbers from `docs/fcos_results.md`, `docs/retinanet_results.md`.
 
-Per-class AP (v2; RetinaNet per-class from the val/EMA evaluation — FCOS per-class not yet extracted):
+Per-class AP (v2; from the val/TTA evaluation):
 
 | Class | FCOS v2 | RetinaNet v2 | RetinaNet v1 |
 |-------|---------|--------------|--------------|
-| ActiveTB | — | **0.0848** | 0.065 |
-| ObsoleteTB | — | 0.0025 | 0.030 |
+| ActiveTB | **0.0887** | 0.0848 | 0.065 |
+| ObsoleteTB | 0.0068 | 0.0025 | 0.030 |
 
 ## Test-time augmentation (TTA)
 
