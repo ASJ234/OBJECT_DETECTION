@@ -3,7 +3,9 @@
 **Dataset**: TBX11K chest X-rays — train 6,600 imgs / 902 boxes, val 1,800 / 309, test 3,302 / 0
 **Classes**: Active Tuberculosis (1, 724 train boxes), Obsolete Pulmonary TB (2, 178 train boxes) — ~4:1 imbalance
 **Models**: FCOS (ResNet-50 + FPN) and RetinaNet (ResNet-50 + FPN v2), both torchvision, COCO-pretrained, heads replaced for 2 classes
-**Input resolution**: 1024 / 1536 · **Sampling**: WeightedRandomSampler, ActiveTB capped at 200 boxes/epoch, negatives weight 0.05
+**Input resolution**: 1024 / 1536 · **Sampling**: WeightedRandomSampler — ActiveTB capped at 200 boxes/epoch
+(**201 ActiveTB annotations sampled, 227 effective incl. mixed images**) vs **178 ObsoleteTB**,
+negatives weight 0.05. Both models trained on this same ~1.1:1 per-epoch class balance.
 
 Two runs per model:
 - **v1** — baseline (raw-count alphas `[0.25, 0.35]`, RetinaNet head randomly initialized, no negative-image loss damping)
