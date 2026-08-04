@@ -6,7 +6,46 @@
 
 ---
 
-## 1. Best Result Summary
+## v2 — post-fix retraining (Fix Round 2)
+
+Run with all Fix Round 2 changes (`train_retinanet.py`): warm-started head convs,
+`neg_loss_scale=0.1`, sampled-count alphas `[0.35, 0.446]`, warmup 3, batch **4** (reduced
+from 8 to fit the 11 GB card — the old default OOM'd). Sections 1–9 below are the **v1
+pre-fix baseline**, kept for comparison.
+
+### Best-model COCO metrics (vs v1)
+
+| Metric | v2 | v1 (pre-fix) |
+|--------|----|--------------|
+| mAP@0.5:0.95 (best) | **0.0658** (E75) | 0.0477 (E73) |
+| mAP@0.5 | **0.1739** | 0.1228 |
+| mAP@0.75 | 0.0264 | 0.0255 |
+| val/AP ActiveTB | **0.0848** | 0.065 |
+| val/AP ObsoleteTB | 0.0025 | 0.030 |
+| val/AR@1 / @10 / @100 | 0.072 / 0.195 / **0.237** | 0.107 / 0.179 / 0.187 |
+
+- Best checkpoint saved at **epoch 75 (the last epoch)** — the model was still improving when
+  training stopped (LR had decayed to 1e-7); a longer run is the obvious next step.
+- `val/mAP@0.5:0.95` (EMA checkpoints) = 0.0437; TTA = 0.0437. The 0.0658 is the best-model
+  eval reported by the training loop; per-class APs above are from the val (EMA) evaluation.
+- Final losses: classification 0.207, bbox-regression 0.113.
+
+### What the fixes changed — and what they didn't
+
+**Improved:** mAP 0.048 → 0.066, AP@0.5 0.123 → 0.174, ActiveTB AP 0.065 → 0.085,
+AR@100 0.187 → 0.237. Scores moved off the 0.050 floor (final-epoch val debug: top-5 scores
+~0.05–0.08, best >0.08) and localization stayed strong (both GT boxes matched at IoU 0.58/0.64;
+pred boxes at 0.49–0.58).
+
+**Still the bottleneck:** **ObsoleteTB AP collapsed 0.030 → 0.0025**, and even correct boxes
+score only ~0.08 (logit ≈ −2.4) — far below a usable 0.3 threshold. Thresholded confusion
+(IoU ≥ 0.5): ActiveTB P 0.007 / R 0.456, ObsoleteTB P 0.001 / R 0.492 — recall is healthy for
+both classes; precision is crushed by background false positives at low scores. The
+two-class discrimination problem (not geometry) is what still caps this run.
+
+---
+
+## 1. Best Result Summary (v1 baseline)
 
 | Metric | Value | Epoch | Source |
 |--------|-------|-------|--------|

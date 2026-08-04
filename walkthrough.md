@@ -90,3 +90,11 @@ python tools/analyze_predictions.py --gt dataset/coco/val.json \
 ```
 Success looks like: TP scores well above 0.3, fewer total predictions at the 0.05 floor, and a
 rising ObsoleteTB AP.
+
+### Fix Round 2 outcome (RetinaNet v2, batch 4 to fit 11 GB)
+
+RetinaNet best mAP@0.5:0.95 rose 0.0477 → **0.0658** (epoch 75 = last epoch, still improving),
+AP@0.5 0.123 → 0.174, ActiveTB AP 0.065 → 0.085, AR@100 0.187 → 0.237; scores moved off the
+0.050 floor (top ~0.08) and localization stayed strong (both GT matched at IoU ≥ 0.58).
+Remaining bottleneck: ObsoleteTB AP fell 0.030 → 0.0025 and TP confidence is still ~0.08 —
+the inter-class discrimination problem, not geometry. Full numbers in `docs/retinanet_results.md`.
